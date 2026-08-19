@@ -1,0 +1,30 @@
+name: CI（テスト＆ビルド確認）
+
+on:
+  pull_request:
+    branches: ['**']
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Node.js セットアップ
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 依存パッケージをインストール
+        run: npm ci
+
+      - name: 型チェック
+        run: npx tsc --noEmit
+
+      - name: テスト実行
+        run: npm test
+
+      - name: ビルド確認
+        run: npm run build
