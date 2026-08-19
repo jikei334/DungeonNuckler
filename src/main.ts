@@ -1,15 +1,17 @@
 import Phaser from 'phaser';
+import { Phase1PreviewScene } from './scenes/GameScene';
+import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
 
 /**
- * Phaser.Gameのエントリーポイント
- * シーンは後続フェーズで追加する
+ * Phaser.Game のエントリーポイント
+ * Phase 1: フロア生成確認用シーンを起動する
  */
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 800,
-  height: 600,
+  width: VIEWPORT_WIDTH,
+  height: VIEWPORT_HEIGHT,
   backgroundColor: '#000000',
-  scene: [],
+  scene: [Phase1PreviewScene],
   parent: document.body,
 };
 
