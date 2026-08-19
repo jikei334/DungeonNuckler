@@ -3,40 +3,57 @@ import { DungeonGenerator } from '../dungeon/DungeonGenerator';
 import { FogOfWar } from '../dungeon/FogOfWar';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
+import { TimerSystem } from '../systems/TimerSystem';
 import type { DungeonFloor, PlayerData, Direction } from '../types';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
-  LOG_LINES, UI_PANEL_HEIGHT,
+  LOG_LINES, UI_PANEL_HEIGHT, TIMER_BAR_HEIGHT,
 } from '../constants';
 
 // --- 描画色定数 ---
-const C_WALL          = 0x333333;
-const C_FLOOR         = 0x4a4a4a;
-const C_STAIRS        = 0xccaa00;
-const C_UNSEEN        = 0x000000;
-const C_PLAYER        = 0x33dd66;
-const C_ENEMY         = 0xff4444;
-const C_ENEMY_BOSS    = 0xff8800;
-const C_HP_RED        = 0xdd2222;
-const C_HP_GREEN      = 0x22dd44;
-const ALPHA_EXPLORED  = 0.62;
+const C_WALL         = 0x333333;
+const C_FLOOR        = 0x4a4a4a;
+const C_STAIRS       = 0xccaa00;
+const C_UNSEEN       = 0x000000;
+const C_PLAYER       = 0x33dd66;
+const C_ENEMY        = 0xff4444;
+const C_ENEMY_BOSS   = 0xff8800;
+const C_HP_RED       = 0xdd2222;
+const C_HP_GREEN     = 0x22dd44;
+const C_TIMER_BG     = 0x222222;
+const C_TIMER_GREEN  = 0x22cc44;
+const C_TIMER_YELLOW = 0xcccc22;
+const C_TIMER_RED    = 0xcc2222;
+const ALPHA_EXPLORED = 0.62;
+
+/** タイマーバーのY座標（上部UIの下） */
+const TIMER_BAR_Y = 48;
+/** タイマーバーのX余白 */
+const TIMER_BAR_MARGIN = 8;
+/** タイマーバーの幅 */
+const TIMER_BAR_WIDTH = VIEWPORT_WIDTH - TIMER_BAR_MARGIN * 2;
 
 /** ゲームメインシーン */
 export class GameScene extends Phaser.Scene {
   private floor!: DungeonFloor;
   private player!: PlayerData;
+  private timer!: TimerSystem;
+
   // グラフィックスレイヤー
   private tileGfx!: Phaser.GameObjects.Graphics;
   private fogGfx!: Phaser.GameObjects.Graphics;
   private entityGfx!: Phaser.GameObjects.Graphics;
   private uiGfx!: Phaser.GameObjects.Graphics;
+  /** タイマーバー専用レイヤー（毎フレーム更新） */
+  private timerGfx!: Phaser.GameObjects.Graphics;
 
   // UIテキスト
   private logTexts: Phaser.GameObjects.Text[] = [];
   private logMessages: string[] = [];
   private floorText!: Phaser.GameObjects.Text;
   private levelText!: Phaser.GameObjects.Text;
+  private timerLabel!: Phaser.GameObjects.Text;
 
   // ターン制御
   private isWaitingForInput = false;
@@ -59,7 +76,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * シーン初期化：フロア生成・グラフィックス・カメラ・キー設定
+   * シーン初期化：フロア生成・グラフィックス・カメラ・キー・タイマー設定
    */
   create(): void {
     const data = this.scene.settings.data as { floorNumber?: number; seed?: number } | undefined;
@@ -68,12 +85,14 @@ export class GameScene extends Phaser.Scene {
 
     this.floor = DungeonGenerator.generate(floorNumber, seed);
     this.player = Player.createInitial(this.floor.playerStart);
+    this.timer = new TimerSystem(floorNumber);
 
-    // グラフィックスレイヤー（描画順: タイル→フォグ→エンティティ→UI）
+    // グラフィックスレイヤー（描画順: タイル→フォグ→エンティティ→UI→タイマー）
     this.tileGfx   = this.add.graphics();
     this.fogGfx    = this.add.graphics();
     this.entityGfx = this.add.graphics();
     this.uiGfx     = this.add.graphics().setScrollFactor(0).setDepth(50);
+    this.timerGfx  = this.add.graphics().setScrollFactor(0).setDepth(60);
 
     // UIテキスト初期化
     this.setupUI();
@@ -85,7 +104,7 @@ export class GameScene extends Phaser.Scene {
     // キー登録
     this.setupKeys();
 
-    // ドキュメント非アクティブ時のタイマー一時停止（Phase 3で使用）
+    // タブ非アクティブ時にタイマーを一時停止する
     document.addEventListener('visibilitychange', this.onVisibilityChange);
 
     // 初期視界計算と描画
@@ -100,28 +119,34 @@ export class GameScene extends Phaser.Scene {
    * UIコンポーネントを初期化する
    */
   private setupUI(): void {
-    const textStyle: Phaser.Types.GameObjects.Text.TextStyle = {
+    const baseStyle: Phaser.Types.GameObjects.Text.TextStyle = {
       fontSize: '14px',
       color: '#ffffff',
       fontFamily: 'monospace',
     };
 
     // フロア番号（左上）
-    this.floorText = this.add.text(8, 8, '', { ...textStyle, color: '#aaffff' })
+    this.floorText = this.add.text(TIMER_BAR_MARGIN, 8, '', { ...baseStyle, color: '#aaffff' })
       .setScrollFactor(0).setDepth(100);
 
-    // レベル・EXP（左上、フロアの下）
-    this.levelText = this.add.text(8, 28, '', textStyle)
+    // レベル・ATK（フロアの右隣）
+    this.levelText = this.add.text(TIMER_BAR_MARGIN, 28, '', baseStyle)
       .setScrollFactor(0).setDepth(100);
+
+    // タイマーラベル（タイマーバーの右端）
+    this.timerLabel = this.add.text(
+      VIEWPORT_WIDTH - TIMER_BAR_MARGIN, TIMER_BAR_Y - 2, '',
+      { fontSize: '11px', color: '#aaaaaa', fontFamily: 'monospace' }
+    ).setScrollFactor(0).setDepth(100).setOrigin(1, 1);
 
     // 戦闘ログ（画面下部）
-    const logY = VIEWPORT_HEIGHT - UI_PANEL_HEIGHT + 4;
+    const logY = VIEWPORT_HEIGHT - UI_PANEL_HEIGHT + 6;
     for (let i = 0; i < LOG_LINES; i++) {
       this.logTexts.push(
-        this.add.text(8, logY + i * 16, '', {
-          ...textStyle,
+        this.add.text(TIMER_BAR_MARGIN, logY + i * 15, '', {
+          ...baseStyle,
           fontSize: '12px',
-          color: i === 0 ? '#ffffff' : '#aaaaaa',
+          color: '#dddddd',
         }).setScrollFactor(0).setDepth(100)
       );
     }
@@ -148,19 +173,21 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * プレイヤーターンを開始する（入力待ち状態に移行）
+   * プレイヤーターンを開始する（入力待ち状態に移行し、タイマーをスタート）
    */
   startPlayerTurn(): void {
     this.isWaitingForInput = true;
+    this.timer.start();
   }
 
   /**
    * プレイヤーのアクションを処理し、敵ターンへ移行する
-   * @param action - 'up'|'down'|'left'|'right'|'wait'
+   * @param action - 移動方向または 'wait'（棒立ち含む）
    */
   private processPlayerAction(action: Direction | 'wait'): void {
     if (!this.isWaitingForInput) return;
     this.isWaitingForInput = false;
+    this.timer.stop();
     this.turnCount++;
 
     if (action === 'wait') {
@@ -175,27 +202,21 @@ export class GameScene extends Phaser.Scene {
         // バンプアタック（Phase 6で戦闘解決を実装）
         const enemy = this.floor.enemies.find((e) => e.id === bumpedEnemyId);
         if (enemy) {
-          this.addLog(`${enemy.isBoss ? '【ボス】' : '敵'}に体当たり！（戦闘はPhase6実装）`);
+          this.addLog(`${enemy.isBoss ? '【ボス】' : '敵'}に体当たり！（Phase 6で実装）`);
         }
       } else if (moved) {
-        // 移動後に視界を更新
         FogOfWar.updateVisibility(this.player, this.floor);
 
         // 階段チェック（Phase 7で実装）
         const { stairsPos } = this.floor;
         if (this.player.pos.x === stairsPos.x && this.player.pos.y === stairsPos.y) {
-          this.addLog('階段を見つけた！（Phase7で実装）');
+          this.addLog('階段を発見！（Phase 7で実装）');
         }
       }
     }
 
-    // 再描画
     this.redraw();
-
-    // 敵ターン（Phase 4で実装）
     this.processEnemyTurns();
-
-    // 次のプレイヤーターンへ
     this.startPlayerTurn();
   }
 
@@ -221,26 +242,25 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * UIテキストを更新する
+   * 上部UIテキスト（フロア・ターン・レベル・ATK）を更新する
    */
   private updateUIText(): void {
     this.floorText.setText(`Floor ${this.floor.floorNumber} | Turn ${this.turnCount}`);
-    this.levelText.setText(`Lv.${this.player.level} | HP: ${this.player.hp}/${this.player.maxHp} | ATK: ${this.player.atk}`);
+    this.levelText.setText(`Lv.${this.player.level}  ATK: ${this.player.atk}`);
   }
 
   /**
-   * 戦闘ログテキストを更新する
+   * 戦闘ログテキストを更新する（古いほど薄く表示）
    */
   private updateLogText(): void {
     for (let i = 0; i < LOG_LINES; i++) {
-      const msg = this.logMessages[i] ?? '';
-      this.logTexts[i].setText(msg);
-      this.logTexts[i].setAlpha(i === 0 ? 1.0 : Math.max(0.3, 1.0 - i * 0.2));
+      this.logTexts[i].setText(this.logMessages[i] ?? '');
+      this.logTexts[i].setAlpha(i === 0 ? 1.0 : Math.max(0.25, 1.0 - i * 0.22));
     }
   }
 
   /**
-   * 全グラフィックスを再描画する
+   * 全グラフィックスを再描画する（ターン切り替わり時に呼ぶ）
    */
   private redraw(): void {
     this.drawTiles();
@@ -270,18 +290,15 @@ export class GameScene extends Phaser.Scene {
           continue;
         }
 
-        // タイル本体
         const color = tile === 'wall' ? C_WALL : tile === 'stairs' ? C_STAIRS : C_FLOOR;
         this.tileGfx.fillStyle(color, 1);
         this.tileGfx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
 
-        // グリッド線（床・階段のみ）
         if (tile !== 'wall') {
           this.tileGfx.lineStyle(1, 0x3a3a3a, 0.4);
           this.tileGfx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
         }
 
-        // 探索済み・現在非視界はオーバーレイで暗くする
         if (vis === 'explored') {
           this.fogGfx.fillStyle(C_UNSEEN, ALPHA_EXPLORED);
           this.fogGfx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
@@ -291,13 +308,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * プレイヤーと敵を描画する
-   * 視界外の敵は描画しない（explored タイルの敵は非表示）
+   * プレイヤーと敵を描画する（視界外の敵は非表示）
    */
   private drawEntities(): void {
     this.entityGfx.clear();
 
-    // 敵を描画（視界コーン内のみ）
     for (const enemy of this.floor.enemies) {
       const vis = this.floor.visibility[enemy.pos.y]?.[enemy.pos.x];
       if (vis !== 'visible') continue;
@@ -306,58 +321,46 @@ export class GameScene extends Phaser.Scene {
       const py = enemy.pos.y * TILE_SIZE;
       const color = enemy.isBoss ? C_ENEMY_BOSS : C_ENEMY;
       const pad = enemy.isBoss ? 2 : 5;
-      const size = TILE_SIZE - pad * 2;
 
       this.entityGfx.fillStyle(color, 1);
-      this.entityGfx.fillRect(px + pad, py + pad, size, size);
-
-      // 敵HPバー
+      this.entityGfx.fillRect(px + pad, py + pad, TILE_SIZE - pad * 2, TILE_SIZE - pad * 2);
       this.drawEnemyHpBar(px, py, enemy.hp, enemy.maxHp);
     }
 
-    // プレイヤーを描画
+    // プレイヤー
     const px = this.player.pos.x * TILE_SIZE;
     const py = this.player.pos.y * TILE_SIZE;
-    const pad = 4;
     this.entityGfx.fillStyle(C_PLAYER, 1);
-    this.entityGfx.fillRect(px + pad, py + pad, TILE_SIZE - pad * 2, TILE_SIZE - pad * 2);
-
-    // 向きインジケーター（小さな三角形）
+    this.entityGfx.fillRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
     this.drawFacingIndicator(px, py);
   }
 
   /**
-   * 敵のHPバーを描画する
-   * @param px - 敵の描画X座標（ピクセル）
-   * @param py - 敵の描画Y座標（ピクセル）
+   * 敵のHPバーをエンティティの上部に描画する
+   * @param px - 敵の描画X（ピクセル）
+   * @param py - 敵の描画Y（ピクセル）
    * @param hp - 現在HP
    * @param maxHp - 最大HP
    */
   private drawEnemyHpBar(px: number, py: number, hp: number, maxHp: number): void {
     const barW = TILE_SIZE - 4;
     const barH = 4;
-    const barX = px + 2;
-    const barY = py - 6;
     const ratio = hp / maxHp;
-
-    // 背景（赤）
     this.entityGfx.fillStyle(C_HP_RED, 1);
-    this.entityGfx.fillRect(barX, barY, barW, barH);
-
-    // 前景（緑）
+    this.entityGfx.fillRect(px + 2, py - 6, barW, barH);
     this.entityGfx.fillStyle(C_HP_GREEN, 1);
-    this.entityGfx.fillRect(barX, barY, Math.round(barW * ratio), barH);
+    this.entityGfx.fillRect(px + 2, py - 6, Math.round(barW * ratio), barH);
   }
 
   /**
-   * プレイヤーの向きインジケーターを描画する（小さな三角形）
-   * @param px - プレイヤーの描画X座標
-   * @param py - プレイヤーの描画Y座標
+   * プレイヤーの向きを示す三角形を描画する
+   * @param px - プレイヤーの描画X（ピクセル）
+   * @param py - プレイヤーの描画Y（ピクセル）
    */
   private drawFacingIndicator(px: number, py: number): void {
     const cx = px + TILE_SIZE / 2;
     const cy = py + TILE_SIZE / 2;
-    const r = 5; // 三角形のサイズ
+    const r = 5;
     let pts: { x: number; y: number }[];
 
     switch (this.player.facing) {
@@ -375,7 +378,7 @@ export class GameScene extends Phaser.Scene {
         break;
     }
 
-    this.entityGfx.fillStyle(0xffffff, 0.9);
+    this.entityGfx.fillStyle(0xffffff, 0.85);
     this.entityGfx.fillTriangle(
       pts[0].x, pts[0].y,
       pts[1].x, pts[1].y,
@@ -384,20 +387,19 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * UIオーバーレイ（ログ背景・HPハート等）を描画する
+   * UIオーバーレイ（上部パネル・ログパネル・HPハート）を描画する
    */
   private drawUIOverlay(): void {
     this.uiGfx.clear();
 
+    // 上部UIパネル背景
+    this.uiGfx.fillStyle(0x000000, 0.65);
+    this.uiGfx.fillRect(0, 0, VIEWPORT_WIDTH, TIMER_BAR_Y + TIMER_BAR_HEIGHT + 4);
+
     // ログパネル背景
-    this.uiGfx.fillStyle(0x000000, 0.7);
+    this.uiGfx.fillStyle(0x000000, 0.72);
     this.uiGfx.fillRect(0, VIEWPORT_HEIGHT - UI_PANEL_HEIGHT, VIEWPORT_WIDTH, UI_PANEL_HEIGHT);
 
-    // 上部UIバー背景
-    this.uiGfx.fillStyle(0x000000, 0.6);
-    this.uiGfx.fillRect(0, 0, VIEWPORT_WIDTH, 52);
-
-    // プレイヤーHPハート（右上）
     this.drawHpHearts();
   }
 
@@ -406,7 +408,7 @@ export class GameScene extends Phaser.Scene {
    */
   private drawHpHearts(): void {
     const heartSize = 18;
-    const startX = VIEWPORT_WIDTH - (this.player.maxHp * (heartSize + 4)) - 8;
+    const startX = VIEWPORT_WIDTH - (this.player.maxHp * (heartSize + 4)) - TIMER_BAR_MARGIN;
     const startY = 10;
 
     for (let i = 0; i < this.player.maxHp; i++) {
@@ -415,63 +417,116 @@ export class GameScene extends Phaser.Scene {
       this.uiGfx.fillStyle(filled ? 0xdd2222 : 0x444444, 1);
       this.uiGfx.fillRect(hx, startY, heartSize, heartSize);
       if (filled) {
-        // ハイライト
-        this.uiGfx.fillStyle(0xff6666, 0.5);
+        this.uiGfx.fillStyle(0xff6666, 0.45);
         this.uiGfx.fillRect(hx + 2, startY + 2, heartSize - 8, 4);
       }
     }
   }
 
   /**
-   * カメラをプレイヤー中心にスムーズに移動する
+   * 行動制限タイマーバーを描画する（毎フレーム更新）
+   * 残り割合に応じて緑→黄→赤に変化し、残り10%以下でバーが点滅する
    */
-  private centerCameraOnPlayer(): void {
-    const targetX = this.player.pos.x * TILE_SIZE + TILE_SIZE / 2;
-    const targetY = this.player.pos.y * TILE_SIZE + TILE_SIZE / 2;
-    this.cameras.main.centerOn(targetX, targetY);
+  private drawTimerBar(): void {
+    this.timerGfx.clear();
+
+    const ratio = this.timer.getRemainingRatio();
+    const filledW = Math.round(TIMER_BAR_WIDTH * ratio);
+
+    // バー背景
+    this.timerGfx.fillStyle(C_TIMER_BG, 1);
+    this.timerGfx.fillRect(TIMER_BAR_MARGIN, TIMER_BAR_Y, TIMER_BAR_WIDTH, TIMER_BAR_HEIGHT);
+
+    // バー前景（残り割合で色変化）
+    const barColor =
+      ratio > 0.5 ? C_TIMER_GREEN :
+      ratio > 0.25 ? C_TIMER_YELLOW :
+      C_TIMER_RED;
+
+    // 残り10%以下は時刻に応じて点滅（Phaser.time.now を使って sin波）
+    let alpha = 1.0;
+    if (ratio <= 0.1 && this.isWaitingForInput) {
+      alpha = 0.5 + 0.5 * Math.sin(this.time.now / 80);
+    }
+
+    if (filledW > 0) {
+      this.timerGfx.fillStyle(barColor, alpha);
+      this.timerGfx.fillRect(TIMER_BAR_MARGIN, TIMER_BAR_Y, filledW, TIMER_BAR_HEIGHT);
+    }
+
+    // 残り秒数ラベル
+    const remainSec = (this.timer.getRemainingMs() / 1000).toFixed(1);
+    this.timerLabel.setText(`${remainSec}s`);
   }
 
   /**
-   * タブ非アクティブ時の処理（Phase 3でタイマー一時停止に使用）
+   * カメラをプレイヤー座標の中心に合わせる
+   */
+  private centerCameraOnPlayer(): void {
+    const tx = this.player.pos.x * TILE_SIZE + TILE_SIZE / 2;
+    const ty = this.player.pos.y * TILE_SIZE + TILE_SIZE / 2;
+    this.cameras.main.centerOn(tx, ty);
+  }
+
+  /**
+   * タブ非アクティブ時にタイマーを一時停止し、復帰時に再開する
    */
   private onVisibilityChange = (): void => {
-    // Phase 3のタイマー実装で活用する
+    if (document.hidden) {
+      this.timer.pause();
+    } else if (this.isWaitingForInput) {
+      this.timer.resume();
+    }
   };
 
   /**
-   * フレーム毎の更新処理（キー入力の検知）
+   * フレーム毎の更新処理
+   * ・タイマーバーの毎フレーム再描画
+   * ・タイマー切れ判定（棒立ち処理）
+   * ・キー入力検知
    */
   update(): void {
+    // タイマーバーは常時更新（入力待ち中のみ）
+    if (this.isWaitingForInput) {
+      this.drawTimerBar();
+
+      // タイマー切れ → 棒立ち（待機と同じ扱い）
+      if (this.timer.isExpired()) {
+        this.addLog('…（棒立ち）');
+        this.processPlayerAction('wait');
+        return;
+      }
+    }
+
     if (!this.isWaitingForInput) return;
 
-    // 入力をジャストワンショットで処理（JustDown）
+    // キー入力（JustDown でチャタリング防止）
     const JD = Phaser.Input.Keyboard.JustDown;
-
-    if (JD(this.keyW) || JD(this.keyUp))    { this.processPlayerAction('up');    return; }
-    if (JD(this.keyS) || JD(this.keyDown))  { this.processPlayerAction('down');  return; }
-    if (JD(this.keyA) || JD(this.keyLeft))  { this.processPlayerAction('left');  return; }
-    if (JD(this.keyD) || JD(this.keyRight)) { this.processPlayerAction('right'); return; }
-    if (JD(this.keySpace) || JD(this.keyEnter)) {
-      this.processPlayerAction('wait');
-      return;
-    }
+    if (JD(this.keyW) || JD(this.keyUp))         { this.processPlayerAction('up');    return; }
+    if (JD(this.keyS) || JD(this.keyDown))        { this.processPlayerAction('down');  return; }
+    if (JD(this.keyA) || JD(this.keyLeft))        { this.processPlayerAction('left');  return; }
+    if (JD(this.keyD) || JD(this.keyRight))       { this.processPlayerAction('right'); return; }
+    if (JD(this.keySpace) || JD(this.keyEnter))   { this.processPlayerAction('wait');  return; }
   }
 
   /**
-   * シーン終了時のクリーンアップ
+   * シーン終了時のクリーンアップ（イベントリスナー解除）
    */
   shutdown(): void {
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
   }
 
-  // --- デバッグ・テスト用アクセサ ---
+  // --- テスト・デバッグ用アクセサ ---
 
-  /** @returns 現在のDungeonFloor（テスト用） */
+  /** @returns 現在のDungeonFloor */
   getFloor(): DungeonFloor { return this.floor; }
 
-  /** @returns 現在のPlayerData（テスト用） */
+  /** @returns 現在のPlayerData */
   getPlayer(): PlayerData { return this.player; }
 
-  /** @returns ターンカウント（テスト用） */
+  /** @returns ターンカウント */
   getTurnCount(): number { return this.turnCount; }
+
+  /** @returns TimerSystemインスタンス */
+  getTimer(): TimerSystem { return this.timer; }
 }
