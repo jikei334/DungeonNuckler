@@ -136,6 +136,11 @@ export class GameScene extends Phaser.Scene {
 
     this.timer = new TimerSystem(floorNumber);
 
+    // Phaserはシーン再起動時に同一インスタンスを再利用するため、
+    // フィールドを明示的にリセットしないと前フロアのデータが残留する
+    this.logTexts    = [];  // setupUI()で新規Textオブジェクトを追加するため必ずクリア
+    this.logMessages = [];
+
     // グラフィックスレイヤー（描画順: タイル→フォグ→テレグラフ→エンティティ→UI→タイマー）
     this.tileGfx      = this.add.graphics();
     this.fogGfx       = this.add.graphics();
@@ -287,6 +292,9 @@ export class GameScene extends Phaser.Scene {
     // プレイヤー行動後の初回描画（敵ターン後にも redraw するため二重になるが意図的）
     this.redraw();
     this.processEnemyTurns();
+    // プレイヤーが死亡している場合はhandleGameOver()によりシーン遷移済み
+    // startPlayerTurn()を呼ぶとタイマーが再起動してgameoverループになるため跳ばす
+    if (!Player.isAlive(this.player)) return;
     this.startPlayerTurn();
   }
 
