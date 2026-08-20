@@ -47,11 +47,29 @@ const TIMER_BAR_MARGIN = 8;
 /** タイマーバーの幅 */
 const TIMER_BAR_WIDTH = VIEWPORT_WIDTH - TIMER_BAR_MARGIN * 2;
 
+/** フロア遷移時に引き継ぐプレイヤーの永続ステータス */
+interface SavedPlayer {
+  hp: number;
+  atk: number;
+  level: number;
+  exp: number;
+}
+
+/** GameSceneへ渡すシーン起動データ */
+interface GameSceneData {
+  floorNumber?: number;
+  seed?: number;
+  /** フロア遷移時のみ設定。未設定なら新規ゲームとして初期値で生成する */
+  savedPlayer?: SavedPlayer;
+}
+
 /** ゲームメインシーン */
 export class GameScene extends Phaser.Scene {
   private floor!: DungeonFloor;
   private player!: PlayerData;
   private timer!: TimerSystem;
+  /** フロア生成に使うベースシード（フロア遷移で引き継ぐ） */
+  private baseSeed = 0;
 
   // グラフィックスレイヤー（描画順: タイル→フォグ→テレグラフ→エンティティ→UI→タイマー）
   private tileGfx!: Phaser.GameObjects.Graphics;
@@ -100,13 +118,28 @@ export class GameScene extends Phaser.Scene {
    * シーン初期化：フロア生成・グラフィックス・カメラ・キー・タイマー設定
    */
   create(): void {
-    const data = this.scene.settings.data as { floorNumber?: number; seed?: number } | undefined;
+    const data = this.scene.settings.data as GameSceneData | undefined;
     const floorNumber = data?.floorNumber ?? 1;
     const seed = data?.seed ?? Math.floor(Date.now() % 1000000);
+    this.baseSeed = seed;
 
     this.floor = DungeonGenerator.generate(floorNumber, seed);
+
+    // フロア遷移時はステータスを引き継ぐ、新規ゲームは初期値で生成
     this.player = Player.createInitial(this.floor.playerStart);
+    if (data?.savedPlayer) {
+      this.player.hp    = data.savedPlayer.hp;
+      this.player.atk   = data.savedPlayer.atk;
+      this.player.level = data.savedPlayer.level;
+      this.player.exp   = data.savedPlayer.exp;
+    }
+
     this.timer = new TimerSystem(floorNumber);
+
+    // Phaserはシーン再起動時に同一インスタンスを再利用するため、
+    // フィールドを明示的にリセットしないと前フロアのデータが残留する
+    this.logTexts    = [];  // setupUI()で新規Textオブジェクトを追加するため必ずクリア
+    this.logMessages = [];
 
     // グラフィックスレイヤー（描画順: タイル→フォグ→テレグラフ→エンティティ→UI→タイマー）
     this.tileGfx      = this.add.graphics();
@@ -246,10 +279,12 @@ export class GameScene extends Phaser.Scene {
       } else if (moved) {
         FogOfWar.updateVisibility(this.player, this.floor);
 
-        // 階段チェック（Phase 7で実装）
+        // 階段チェック：踏んだ瞬間に次フロアへ遷移する
         const { stairsPos } = this.floor;
         if (this.player.pos.x === stairsPos.x && this.player.pos.y === stairsPos.y) {
-          this.addLog('階段を発見！（Phase 7で実装）');
+          this.redraw();
+          this.goToNextFloor();
+          return; // 敵ターンは発生させない
         }
       }
     }
@@ -257,6 +292,9 @@ export class GameScene extends Phaser.Scene {
     // プレイヤー行動後の初回描画（敵ターン後にも redraw するため二重になるが意図的）
     this.redraw();
     this.processEnemyTurns();
+    // プレイヤーが死亡している場合はhandleGameOver()によりシーン遷移済み
+    // startPlayerTurn()を呼ぶとタイマーが再起動してgameoverループになるため跳ばす
+    if (!Player.isAlive(this.player)) return;
     this.startPlayerTurn();
   }
 
@@ -310,6 +348,30 @@ export class GameScene extends Phaser.Scene {
     // 敵行動後に視界を再計算・再描画
     FogOfWar.updateVisibility(this.player, this.floor);
     this.redraw();
+  }
+
+  /**
+   * 次フロアへ遷移する
+   * プレイヤーのHP・ATK・レベル・EXPを引き継ぎ、タイマーは次フロア用に短縮される
+   */
+  private goToNextFloor(): void {
+    this.timer.stop();
+    this.isWaitingForInput = false;
+    this.clearTouchState();
+
+    const nextFloor = this.floor.floorNumber + 1;
+    this.addLog(`${nextFloor}階へ降りる…`);
+
+    this.scene.start('GameScene', {
+      floorNumber: nextFloor,
+      seed: this.baseSeed,
+      savedPlayer: {
+        hp:    this.player.hp,
+        atk:   this.player.atk,
+        level: this.player.level,
+        exp:   this.player.exp,
+      },
+    } as GameSceneData);
   }
 
   /**
