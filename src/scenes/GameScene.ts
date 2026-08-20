@@ -215,18 +215,39 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // プレイヤー行動後の初回描画（敵ターン後にも redraw するため二重になるが意図的）
     this.redraw();
     this.processEnemyTurns();
     this.startPlayerTurn();
   }
 
   /**
-   * 敵のターン処理（Phase 4で本実装、現在はスタブ）
+   * 敵のターン処理：全敵のAIを1ターン更新し、視界内の敵の動きをログ表示する
+   * Phase 4: idle→chase の状態遷移と追跡移動を実装
+   * Phase 5でテレグラフ・攻撃発動を追加する
    */
   private processEnemyTurns(): void {
     for (const enemy of this.floor.enemies) {
+      const prevState = enemy.state;
+      const prevPos = { ...enemy.pos };
+
       Enemy.updateAI(enemy, this.player, this.floor.tiles, this.floor.enemies);
+
+      // 視界内の敵の状態変化のみログ表示
+      const vis = this.floor.visibility[enemy.pos.y]?.[enemy.pos.x] === 'visible'
+        || this.floor.visibility[prevPos.y]?.[prevPos.x] === 'visible';
+
+      if (vis) {
+        const name = enemy.isBoss ? '【ボス】' : '敵';
+        if (prevState === 'idle' && enemy.state === 'chase') {
+          this.addLog(`${name}が気づいた！`);
+        }
+      }
     }
+
+    // 敵行動後に視界を再計算・再描画
+    FogOfWar.updateVisibility(this.player, this.floor);
+    this.redraw();
   }
 
   /**
