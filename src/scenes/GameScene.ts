@@ -12,20 +12,24 @@ import {
 } from '../constants';
 
 // --- 描画色定数 ---
-const C_WALL         = 0x333333;
-const C_FLOOR        = 0x4a4a4a;
-const C_STAIRS       = 0xccaa00;
-const C_UNSEEN       = 0x000000;
-const C_PLAYER       = 0x33dd66;
-const C_ENEMY        = 0xff4444;
-const C_ENEMY_BOSS   = 0xff8800;
-const C_HP_RED       = 0xdd2222;
-const C_HP_GREEN     = 0x22dd44;
-const C_TIMER_BG     = 0x222222;
-const C_TIMER_GREEN  = 0x22cc44;
-const C_TIMER_YELLOW = 0xcccc22;
-const C_TIMER_RED    = 0xcc2222;
-const ALPHA_EXPLORED = 0.62;
+const C_WALL              = 0x333333;
+const C_FLOOR             = 0x4a4a4a;
+const C_STAIRS            = 0xccaa00;
+const C_UNSEEN            = 0x000000;
+const C_PLAYER            = 0x33dd66;
+const C_ENEMY             = 0xff4444;
+const C_ENEMY_BOSS        = 0xff8800;
+const C_HP_RED            = 0xdd2222;
+const C_HP_GREEN          = 0x22dd44;
+const C_TIMER_BG          = 0x222222;
+const C_TIMER_GREEN       = 0x22cc44;
+const C_TIMER_YELLOW      = 0xcccc22;
+const C_TIMER_RED         = 0xcc2222;
+const C_TELEGRAPH_WARN    = 0xddaa00;  // テレグラフ警告色（黄）
+const C_TELEGRAPH_DANGER  = 0xdd2200;  // テレグラフ最終ターン色（赤）
+const ALPHA_EXPLORED      = 0.62;
+const ALPHA_TELEGRAPH     = 0.40;      // テレグラフ通常アルファ
+const ALPHA_TELEGRAPH_MAX = 0.72;      // テレグラフ最終ターン最大アルファ
 
 /** タイマーバーのY座標（上部UIの下） */
 const TIMER_BAR_Y = 48;
@@ -40,9 +44,11 @@ export class GameScene extends Phaser.Scene {
   private player!: PlayerData;
   private timer!: TimerSystem;
 
-  // グラフィックスレイヤー
+  // グラフィックスレイヤー（描画順: タイル→フォグ→テレグラフ→エンティティ→UI→タイマー）
   private tileGfx!: Phaser.GameObjects.Graphics;
   private fogGfx!: Phaser.GameObjects.Graphics;
+  /** テレグラフ予告表示レイヤー（フォグより上、エンティティより下） */
+  private telegraphGfx!: Phaser.GameObjects.Graphics;
   private entityGfx!: Phaser.GameObjects.Graphics;
   private uiGfx!: Phaser.GameObjects.Graphics;
   /** タイマーバー専用レイヤー（毎フレーム更新） */
@@ -87,12 +93,13 @@ export class GameScene extends Phaser.Scene {
     this.player = Player.createInitial(this.floor.playerStart);
     this.timer = new TimerSystem(floorNumber);
 
-    // グラフィックスレイヤー（描画順: タイル→フォグ→エンティティ→UI→タイマー）
-    this.tileGfx   = this.add.graphics();
-    this.fogGfx    = this.add.graphics();
-    this.entityGfx = this.add.graphics();
-    this.uiGfx     = this.add.graphics().setScrollFactor(0).setDepth(50);
-    this.timerGfx  = this.add.graphics().setScrollFactor(0).setDepth(60);
+    // グラフィックスレイヤー（描画順: タイル→フォグ→テレグラフ→エンティティ→UI→タイマー）
+    this.tileGfx      = this.add.graphics();
+    this.fogGfx       = this.add.graphics();
+    this.telegraphGfx = this.add.graphics();
+    this.entityGfx    = this.add.graphics();
+    this.uiGfx        = this.add.graphics().setScrollFactor(0).setDepth(50);
+    this.timerGfx     = this.add.graphics().setScrollFactor(0).setDepth(60);
 
     // UIテキスト初期化
     this.setupUI();
@@ -222,25 +229,48 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 敵のターン処理：全敵のAIを1ターン更新し、視界内の敵の動きをログ表示する
-   * Phase 4: idle→chase の状態遷移と追跡移動を実装
-   * Phase 5でテレグラフ・攻撃発動を追加する
+   * 敵のターン処理：全敵のAIを1ターン更新し、攻撃発動・ダメージ・ログを処理する
+   * IDLE→CHASE: 「気づいた」ログ
+   * CHASE→TELEGRAPH: 「攻撃予告」ログ
+   * EXECUTE: プレイヤーが対象タイルにいれば固定1ダメージ
    */
   private processEnemyTurns(): void {
     for (const enemy of this.floor.enemies) {
       const prevState = enemy.state;
-      const prevPos = { ...enemy.pos };
+      // テレグラフの対象タイルを攻撃発動前に保存（execute後に消去されるため）
+      const telegraphTiles = enemy.telegraph ? [...enemy.telegraph.targetTiles] : [];
 
-      Enemy.updateAI(enemy, this.player, this.floor.tiles, this.floor.enemies);
+      const didExecute = Enemy.updateAI(enemy, this.player, this.floor.tiles, this.floor.enemies);
 
-      // 視界内の敵の状態変化のみログ表示
-      const vis = this.floor.visibility[enemy.pos.y]?.[enemy.pos.x] === 'visible'
-        || this.floor.visibility[prevPos.y]?.[prevPos.x] === 'visible';
+      const name = enemy.isBoss ? '【ボス】' : '敵';
+      // 状態変化をログに出力（視界内の敵のみ）
+      const isVisible =
+        this.floor.visibility[enemy.pos.y]?.[enemy.pos.x] === 'visible';
 
-      if (vis) {
-        const name = enemy.isBoss ? '【ボス】' : '敵';
+      if (isVisible) {
         if (prevState === 'idle' && enemy.state === 'chase') {
           this.addLog(`${name}が気づいた！`);
+        }
+        if (prevState === 'chase' && enemy.state === 'telegraph') {
+          this.addLog(`${name}が攻撃の構えを取った！`);
+        }
+      }
+
+      // 攻撃発動：テレグラフ対象にプレイヤーがいれば固定1ダメージ
+      if (didExecute && telegraphTiles.length > 0) {
+        const hit = telegraphTiles.some(
+          (t) => t.x === this.player.pos.x && t.y === this.player.pos.y
+        );
+        if (hit) {
+          Player.takeDamage(this.player, 1);
+          this.addLog(`${name}の攻撃が命中！ HP残り ${this.player.hp}/${this.player.maxHp}`);
+
+          if (!Player.isAlive(this.player)) {
+            this.handleGameOver();
+            return;
+          }
+        } else if (isVisible) {
+          this.addLog(`${name}の攻撃を回避した！`);
         }
       }
     }
@@ -248,6 +278,19 @@ export class GameScene extends Phaser.Scene {
     // 敵行動後に視界を再計算・再描画
     FogOfWar.updateVisibility(this.player, this.floor);
     this.redraw();
+  }
+
+  /**
+   * ゲームオーバー処理：GameOverSceneへ遷移する
+   */
+  private handleGameOver(): void {
+    this.timer.stop();
+    this.isWaitingForInput = false;
+    this.scene.start('GameOverScene', {
+      floorNumber: this.floor.floorNumber,
+      level: this.player.level,
+      turnCount: this.turnCount,
+    });
   }
 
   /**
@@ -285,6 +328,7 @@ export class GameScene extends Phaser.Scene {
    */
   private redraw(): void {
     this.drawTiles();
+    this.drawTelegraphs();
     this.drawEntities();
     this.drawUIOverlay();
     this.updateUIText();
@@ -323,6 +367,50 @@ export class GameScene extends Phaser.Scene {
         if (vis === 'explored') {
           this.fogGfx.fillStyle(C_UNSEEN, ALPHA_EXPLORED);
           this.fogGfx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+        }
+      }
+    }
+  }
+
+  /**
+   * 敵の攻撃予告（テレグラフ）を描画する
+   * 視界内（visible）タイルのテレグラフのみ表示する
+   * - 通常予告: 黄色半透明オーバーレイ
+   * - 最終予告ターン（turnsUntilExecute === 1）: 赤で点滅（強調）
+   */
+  private drawTelegraphs(): void {
+    this.telegraphGfx.clear();
+
+    for (const enemy of this.floor.enemies) {
+      if (!enemy.telegraph || enemy.state === 'cooldown') continue;
+
+      const { targetTiles, turnsUntilExecute } = enemy.telegraph;
+      const isFinal = turnsUntilExecute <= 1;
+
+      for (const tile of targetTiles) {
+        // 視界内のタイルのみ表示（視界外の予告は見えない）
+        const vis = this.floor.visibility[tile.y]?.[tile.x];
+        if (vis !== 'visible') continue;
+
+        const px = tile.x * TILE_SIZE;
+        const py = tile.y * TILE_SIZE;
+
+        if (isFinal) {
+          // 最終ターン：赤で点滅（sin波でアルファを変化させる）
+          const blinkAlpha = ALPHA_TELEGRAPH + (ALPHA_TELEGRAPH_MAX - ALPHA_TELEGRAPH)
+            * (0.5 + 0.5 * Math.sin(this.time.now / 120));
+          this.telegraphGfx.fillStyle(C_TELEGRAPH_DANGER, blinkAlpha);
+        } else {
+          // 通常予告：黄色半透明
+          this.telegraphGfx.fillStyle(C_TELEGRAPH_WARN, ALPHA_TELEGRAPH);
+        }
+
+        this.telegraphGfx.fillRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+
+        // 枠線（最終ターンのみ）
+        if (isFinal) {
+          this.telegraphGfx.lineStyle(2, C_TELEGRAPH_DANGER, 0.9);
+          this.telegraphGfx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
         }
       }
     }
