@@ -66,6 +66,8 @@ export const TELEGRAPH_TURNS_BOSS = 3;
 export const FOV_RANGE = 6;
 /** 視界角度（度） */
 export const FOV_ANGLE_DEG = 90;
+/** プレイヤー周囲の常時表示半径（向き・遮蔽に関わらず visible にするマス数） */
+export const FOV_SURROUNDINGS_RADIUS = 1;
 
 // --- EXPテーブル（index=レベル、値=そのレベルになるのに必要な累積EXP） ---
 export const EXP_TABLE: number[] = [0, 20, 50, 90, 140, 200, 270, 350, 440, 540, 650];

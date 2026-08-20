@@ -1,5 +1,5 @@
 import type { PlayerData, DungeonFloor, Vec2, TileType } from '../types';
-import { FOV_RANGE, FOV_ANGLE_DEG } from '../constants';
+import { FOV_RANGE, FOV_ANGLE_DEG, FOV_SURROUNDINGS_RADIUS } from '../constants';
 
 /** 方向ベクトルのマッピング */
 const FACING_VEC: Record<string, Vec2> = {
@@ -31,13 +31,23 @@ export class FogOfWar {
       }
     }
 
-    // プレイヤー自身のタイルは常に visible
-    visibility[player.pos.y][player.pos.x] = 'visible';
-
-    // 視界コーン内の各タイルを判定
     const range = FOV_RANGE;
     const px = player.pos.x;
     const py = player.pos.y;
+
+    // プレイヤー自身のタイルと周囲 FOV_SURROUNDINGS_RADIUS マスは常に visible
+    // （向きや壁遮蔽に関わらず、真隣は常に見える）
+    for (let dy = -FOV_SURROUNDINGS_RADIUS; dy <= FOV_SURROUNDINGS_RADIUS; dy++) {
+      for (let dx = -FOV_SURROUNDINGS_RADIUS; dx <= FOV_SURROUNDINGS_RADIUS; dx++) {
+        const sx = px + dx;
+        const sy = py + dy;
+        if (sx >= 0 && sx < width && sy >= 0 && sy < height) {
+          visibility[sy][sx] = 'visible';
+        }
+      }
+    }
+
+    // 視界コーン内の各タイルを判定
 
     for (let dy = -range; dy <= range; dy++) {
       for (let dx = -range; dx <= range; dx++) {
