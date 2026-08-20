@@ -21,10 +21,20 @@ const AUTO_MOVE_INTERVAL_MS = 160;
 const TOUCH_DEAD_ZONE_PX = 8;
 
 // --- 描画色定数 ---
-const C_WALL              = 0x333333;
-const C_FLOOR             = 0x4a4a4a;
-const C_STAIRS            = 0xccaa00;
-const C_UNSEEN            = 0x000000;
+
+// 現在視界内タイル（明るく表示）
+const C_WALL_VISIBLE    = 0x888888;  // 中明度グレー
+const C_FLOOR_VISIBLE   = 0x666666;  // やや暗いグレー
+const C_STAIRS_VISIBLE  = 0xccaa00;  // 明るい金色
+
+// 過去に見たが現在視界外のタイル（暗く・青みがかった記憶色）
+const C_WALL_EXPLORED   = 0x3a3a4a;  // 暗青灰（壁の輪郭が見える程度）
+const C_FLOOR_EXPLORED  = 0x1e1e2a;  // 極暗・青みがかった暗色
+const C_STAIRS_EXPLORED = 0x664400;  // 暗い金色
+
+// 未探索エリア
+const C_UNSEEN          = 0x000000;  // 完全な黒
+
 const C_PLAYER            = 0x33dd66;
 const C_ENEMY             = 0xff4444;
 const C_ENEMY_BOSS        = 0xff8800;
@@ -36,7 +46,6 @@ const C_TIMER_YELLOW      = 0xcccc22;
 const C_TIMER_RED         = 0xcc2222;
 const C_TELEGRAPH_WARN    = 0xddaa00;  // テレグラフ警告色（黄）
 const C_TELEGRAPH_DANGER  = 0xdd2200;  // テレグラフ最終ターン色（赤）
-const ALPHA_EXPLORED      = 0.62;
 const ALPHA_TELEGRAPH     = 0.40;      // テレグラフ通常アルファ
 const ALPHA_TELEGRAPH_MAX = 0.72;      // テレグラフ最終ターン最大アルファ
 
@@ -435,11 +444,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * タイルマップを描画する（視界状態に応じた色分け）
+   * タイルマップを描画する（視界状態に応じた3段階の色分け）
+   * visible: 明るい通常色、explored: 暗青灰の記憶色、unseen: 純黒
    */
   private drawTiles(): void {
     this.tileGfx.clear();
-    this.fogGfx.clear();
+    this.fogGfx.clear();  // fogGfxは使用しないがリソース解放のためクリア
 
     for (let y = 0; y < MAP_HEIGHT; y++) {
       for (let x = 0; x < MAP_WIDTH; x++) {
@@ -454,18 +464,21 @@ export class GameScene extends Phaser.Scene {
           continue;
         }
 
-        const color = tile === 'wall' ? C_WALL : tile === 'stairs' ? C_STAIRS : C_FLOOR;
+        // 視界内と探索済みで明確に異なる色を直接使用（オーバーレイ方式より識別しやすい）
+        let color: number;
+        if (vis === 'visible') {
+          color = tile === 'wall' ? C_WALL_VISIBLE : tile === 'stairs' ? C_STAIRS_VISIBLE : C_FLOOR_VISIBLE;
+        } else {
+          color = tile === 'wall' ? C_WALL_EXPLORED : tile === 'stairs' ? C_STAIRS_EXPLORED : C_FLOOR_EXPLORED;
+        }
+
         this.tileGfx.fillStyle(color, 1);
         this.tileGfx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
 
-        if (tile !== 'wall') {
+        // グリッド線は visible タイルの床・階段のみ（explored はノイズを減らすため省略）
+        if (vis === 'visible' && tile !== 'wall') {
           this.tileGfx.lineStyle(1, 0x3a3a3a, 0.4);
           this.tileGfx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
-        }
-
-        if (vis === 'explored') {
-          this.fogGfx.fillStyle(C_UNSEEN, ALPHA_EXPLORED);
-          this.fogGfx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
         }
       }
     }

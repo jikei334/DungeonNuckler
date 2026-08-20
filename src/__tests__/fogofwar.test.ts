@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { FogOfWar } from '../dungeon/FogOfWar';
 import { DungeonGenerator } from '../dungeon/DungeonGenerator';
+import { FOV_SURROUNDINGS_RADIUS } from '../constants';
 import type { TileType } from '../types';
 
 /**
@@ -66,14 +67,32 @@ describe('FogOfWar', () => {
   });
 
   describe('updateVisibility()', () => {
-    it('プレイヤー周辺のタイルが visible になる', () => {
+    it('プレイヤー自身のタイルは必ず visible になる', () => {
       const floor = DungeonGenerator.generate(1, 42);
       const player = { pos: floor.playerStart, facing: 'down' as const, hp: 3, maxHp: 3, atk: 2, level: 1, exp: 0 };
 
       FogOfWar.updateVisibility(player, floor);
 
-      // プレイヤー自身のタイルは必ず visible
       expect(floor.visibility[player.pos.y][player.pos.x]).toBe('visible');
+    });
+
+    it('プレイヤー周囲1マスは向き・遮蔽に関わらず visible になる', () => {
+      const floor = DungeonGenerator.generate(1, 42);
+      // 上向きにしてコーン外（後方）のタイルでも visible を確認
+      const player = { pos: floor.playerStart, facing: 'up' as const, hp: 3, maxHp: 3, atk: 2, level: 1, exp: 0 };
+
+      FogOfWar.updateVisibility(player, floor);
+
+      const { x, y } = player.pos;
+      for (let dy = -FOV_SURROUNDINGS_RADIUS; dy <= FOV_SURROUNDINGS_RADIUS; dy++) {
+        for (let dx = -FOV_SURROUNDINGS_RADIUS; dx <= FOV_SURROUNDINGS_RADIUS; dx++) {
+          const sx = x + dx;
+          const sy = y + dy;
+          if (sx >= 0 && sx < floor.width && sy >= 0 && sy < floor.height) {
+            expect(floor.visibility[sy][sx]).toBe('visible');
+          }
+        }
+      }
     });
 
     it('探索済みタイルが次のターンに explored に格下げされる', () => {
