@@ -1,24 +1,21 @@
 import Phaser from 'phaser';
 import { DungeonGenerator } from '../dungeon/DungeonGenerator';
 import { FogOfWar } from '../dungeon/FogOfWar';
+import { BFSPathfinder } from '../dungeon/BFSPathfinder';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { TimerSystem } from '../systems/TimerSystem';
 import { CombatSystem } from '../systems/CombatSystem';
-import type { DungeonFloor, PlayerData, Direction } from '../types';
+import type { DungeonFloor, PlayerData, Direction, Vec2 } from '../types';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
   LOG_LINES, UI_PANEL_HEIGHT, TIMER_BAR_HEIGHT, MAX_LEVEL,
 } from '../constants';
 
-// --- タッチ/クリック入力定数 ---
-/** 長押し判定までの待機時間(ms) */
-const AUTO_MOVE_INITIAL_DELAY_MS = 300;
-/** 連続移動の間隔(ms)（自然な速度感） */
-const AUTO_MOVE_INTERVAL_MS = 160;
-/** タップ方向の不感帯（ピクセル、プレイヤー中心からこれ以下はタップ無効） */
-const TOUCH_DEAD_ZONE_PX = 8;
+// --- クリック/タッチ BFS移動の間隔(ms) ---
+/** 経路自動移動の1ステップ間隔 */
+const BFS_MOVE_INTERVAL_MS = 160;
 
 // --- 描画色定数 ---
 
@@ -80,11 +77,13 @@ export class GameScene extends Phaser.Scene {
   /** フロア生成に使うベースシード（フロア遷移で引き継ぐ） */
   private baseSeed = 0;
 
-  // グラフィックスレイヤー（描画順: タイル→フォグ→テレグラフ→エンティティ→UI→タイマー）
+  // グラフィックスレイヤー（描画順: タイル→フォグ→テレグラフ→経路→エンティティ→UI→タイマー）
   private tileGfx!: Phaser.GameObjects.Graphics;
   private fogGfx!: Phaser.GameObjects.Graphics;
-  /** テレグラフ予告表示レイヤー（フォグより上、エンティティより下） */
+  /** テレグラフ予告表示レイヤー（フォグより上、経路より下） */
   private telegraphGfx!: Phaser.GameObjects.Graphics;
+  /** BFS経路表示レイヤー（テレグラフより上、エンティティより下） */
+  private pathGfx!: Phaser.GameObjects.Graphics;
   private entityGfx!: Phaser.GameObjects.Graphics;
   private uiGfx!: Phaser.GameObjects.Graphics;
   /** タイマーバー専用レイヤー（毎フレーム更新） */
@@ -101,11 +100,9 @@ export class GameScene extends Phaser.Scene {
   private isWaitingForInput = false;
   private turnCount = 0;
 
-  // タッチ/クリック入力の状態管理
-  private touchDir: Direction | null = null;
-  private isAutoMoving = false;
-  private touchDelayEvent: Phaser.Time.TimerEvent | null = null;
-  private touchRepeatEvent: Phaser.Time.TimerEvent | null = null;
+  // BFS経路自動移動の状態管理
+  private bfsPath: Vec2[] = [];
+  private bfsMoveEvent: Phaser.Time.TimerEvent | null = null;
 
   // キー入力
   private keyW!: Phaser.Input.Keyboard.Key;
@@ -149,11 +146,13 @@ export class GameScene extends Phaser.Scene {
     // フィールドを明示的にリセットしないと前フロアのデータが残留する
     this.logTexts    = [];  // setupUI()で新規Textオブジェクトを追加するため必ずクリア
     this.logMessages = [];
+    this.bfsPath     = [];  // BFS経路もフロア遷移時にクリアする
 
-    // グラフィックスレイヤー（描画順: タイル→フォグ→テレグラフ→エンティティ→UI→タイマー）
+    // グラフィックスレイヤー（描画順: タイル→フォグ→テレグラフ→経路→エンティティ→UI→タイマー）
     this.tileGfx      = this.add.graphics();
     this.fogGfx       = this.add.graphics();
     this.telegraphGfx = this.add.graphics();
+    this.pathGfx      = this.add.graphics();  // BFS経路表示
     this.entityGfx    = this.add.graphics();
     this.uiGfx        = this.add.graphics().setScrollFactor(0).setDepth(50);
     this.timerGfx     = this.add.graphics().setScrollFactor(0).setDepth(60);
@@ -366,7 +365,7 @@ export class GameScene extends Phaser.Scene {
   private goToNextFloor(): void {
     this.timer.stop();
     this.isWaitingForInput = false;
-    this.clearTouchState();
+    this.clearBfsPath();
 
     const nextFloor = this.floor.floorNumber + 1;
     this.addLog(`${nextFloor}階へ降りる…`);
@@ -389,7 +388,7 @@ export class GameScene extends Phaser.Scene {
   private handleGameOver(): void {
     this.timer.stop();
     this.isWaitingForInput = false;
-    this.clearTouchState();
+    this.clearBfsPath();
     this.scene.start('GameOverScene', {
       floorNumber: this.floor.floorNumber,
       level: this.player.level,
@@ -437,6 +436,7 @@ export class GameScene extends Phaser.Scene {
   private redraw(): void {
     this.drawTiles();
     this.drawTelegraphs();
+    this.drawBfsPath();
     this.drawEntities();
     this.drawUIOverlay();
     this.updateUIText();
@@ -722,12 +722,13 @@ export class GameScene extends Phaser.Scene {
     if (!this.isWaitingForInput) return;
 
     // キー入力（JustDown でチャタリング防止）
+    // BFS自動移動中にキーを押すと経路をキャンセルして通常移動に切り替える
     const JD = Phaser.Input.Keyboard.JustDown;
-    if (JD(this.keyW) || JD(this.keyUp))         { this.processPlayerAction('up');    return; }
-    if (JD(this.keyS) || JD(this.keyDown))        { this.processPlayerAction('down');  return; }
-    if (JD(this.keyA) || JD(this.keyLeft))        { this.processPlayerAction('left');  return; }
-    if (JD(this.keyD) || JD(this.keyRight))       { this.processPlayerAction('right'); return; }
-    if (JD(this.keySpace) || JD(this.keyEnter))   { this.processPlayerAction('wait');  return; }
+    if (JD(this.keyW) || JD(this.keyUp))         { this.clearBfsPath(); this.processPlayerAction('up');    return; }
+    if (JD(this.keyS) || JD(this.keyDown))        { this.clearBfsPath(); this.processPlayerAction('down');  return; }
+    if (JD(this.keyA) || JD(this.keyLeft))        { this.clearBfsPath(); this.processPlayerAction('left');  return; }
+    if (JD(this.keyD) || JD(this.keyRight))       { this.clearBfsPath(); this.processPlayerAction('right'); return; }
+    if (JD(this.keySpace) || JD(this.keyEnter))   { this.clearBfsPath(); this.processPlayerAction('wait');  return; }
   }
 
   /**
@@ -737,149 +738,145 @@ export class GameScene extends Phaser.Scene {
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
     this.input.off('pointerdown', this.onPointerDown, this);
     this.input.off('pointerup', this.onPointerUp, this);
-    this.clearTouchState();
+    this.clearBfsPath();
   }
 
-  // --- タッチ/クリック入力 ---
+  // --- クリック/タッチ BFS経路移動 ---
 
   /**
-   * ポインタ座標からプレイヤー相対の移動方向を計算する
-   * プレイヤー中心から見て水平・垂直の絶対値が大きい軸を方向として選ぶ
-   *
-   * @param pointerX - スクリーン座標X（Phaserポインタ値）
-   * @param pointerY - スクリーン座標Y（Phaserポインタ値）
-   * @returns 移動方向（不感帯内はnull）
+   * ポインタ押下イベント：進行中のBFS経路をキャンセルする
    */
-  private getDirectionFromPointer(pointerX: number, pointerY: number): Direction | null {
-    // カメラのスクロールを加味してワールド座標へ変換
-    const worldX = pointerX + this.cameras.main.scrollX;
-    const worldY = pointerY + this.cameras.main.scrollY;
-
-    // プレイヤーの中心座標（ワールド座標）
-    const cx = this.player.pos.x * TILE_SIZE + TILE_SIZE / 2;
-    const cy = this.player.pos.y * TILE_SIZE + TILE_SIZE / 2;
-
-    const dx = worldX - cx;
-    const dy = worldY - cy;
-
-    // 不感帯：プレイヤー中心に近すぎるタップは無効
-    if (Math.abs(dx) < TOUCH_DEAD_ZONE_PX && Math.abs(dy) < TOUCH_DEAD_ZONE_PX) return null;
-
-    // 絶対値が大きい軸を移動方向として採用
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      return dx > 0 ? 'right' : 'left';
-    }
-    return dy > 0 ? 'down' : 'up';
-  }
+  private onPointerDown = (): void => {
+    this.clearBfsPath();
+  };
 
   /**
-   * 指定方向への移動が可能か判定する（自動移動用・敵ぶつかりは不可とする）
-   * 壁・マップ外・敵が存在するタイルへの移動は不可
+   * ポインタ離上イベント：クリックしたタイルへのBFS経路を計算して自動移動を開始する
+   * 壁・未探索タイル・敵のいるタイルは目標にできない
+   * 経路が見つからない場合は何もしない
    *
-   * @param dir - 移動方向
-   * @returns 移動可能ならtrue
-   */
-  private canAutoMoveTo(dir: Direction): boolean {
-    const deltas: Record<Direction, { x: number; y: number }> = {
-      up: { x: 0, y: -1 }, down: { x: 0, y: 1 },
-      left: { x: -1, y: 0 }, right: { x: 1, y: 0 },
-    };
-    const { x: dx, y: dy } = deltas[dir];
-    const nx = this.player.pos.x + dx;
-    const ny = this.player.pos.y + dy;
-
-    // マップ外チェック
-    if (ny < 0 || ny >= this.floor.tiles.length || nx < 0 || nx >= this.floor.tiles[0].length) {
-      return false;
-    }
-    // 壁チェック
-    if (this.floor.tiles[ny][nx] === 'wall') return false;
-    // 敵チェック（自動移動では敵に突入しない）
-    if (this.floor.enemies.some((e) => e.pos.x === nx && e.pos.y === ny)) return false;
-
-    return true;
-  }
-
-  /**
-   * ポインタ押下イベント：方向を記録し、長押し判定タイマーを開始する
    * @param pointer - Phaserポインタオブジェクト
    */
-  private onPointerDown = (pointer: Phaser.Input.Pointer): void => {
+  private onPointerUp = (pointer: Phaser.Input.Pointer): void => {
     if (!this.isWaitingForInput) return;
 
-    const dir = this.getDirectionFromPointer(pointer.x, pointer.y);
-    if (!dir) return;
+    // スクリーン座標をワールド座標に変換してタイル位置を算出する
+    const worldX = pointer.x + this.cameras.main.scrollX;
+    const worldY = pointer.y + this.cameras.main.scrollY;
+    const tileX = Math.floor(worldX / TILE_SIZE);
+    const tileY = Math.floor(worldY / TILE_SIZE);
 
-    this.touchDir = dir;
-    this.isAutoMoving = false;
-
-    // 長押し判定タイマーを開始する
-    this.touchDelayEvent = this.time.delayedCall(AUTO_MOVE_INITIAL_DELAY_MS, () => {
-      this.isAutoMoving = true;
-      this.startTouchRepeat();
-    });
-  };
-
-  /**
-   * ポインタ離上イベント：短押しなら1回移動、自動移動中なら停止する
-   */
-  private onPointerUp = (): void => {
-    if (this.touchDir === null) return;
-
-    if (!this.isAutoMoving) {
-      // 短押し → 通常の1回移動（敵への攻撃あり）
-      if (this.isWaitingForInput) {
-        this.processPlayerAction(this.touchDir);
+    if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return;
+    if (tileX === this.player.pos.x && tileY === this.player.pos.y) return;
+    if (this.floor.tiles[tileY][tileX] === 'wall') return;
+    if (this.floor.visibility[tileY][tileX] === 'unseen') return;
+    // 敵タイルをクリックした場合：プレイヤーが隣接していれば攻撃、離れていれば無視
+    const clickedEnemy = this.floor.enemies.find((e) => e.pos.x === tileX && e.pos.y === tileY);
+    if (clickedEnemy) {
+      const dx = tileX - this.player.pos.x;
+      const dy = tileY - this.player.pos.y;
+      if (Math.abs(dx) + Math.abs(dy) === 1) {
+        const dir: Direction = dx === 1 ? 'right' : dx === -1 ? 'left' : dy === 1 ? 'down' : 'up';
+        this.processPlayerAction(dir);
       }
-    }
-
-    this.clearTouchState();
-  };
-
-  /**
-   * 長押し確定後の連続移動ループを開始する
-   * 最初の1マスを即時実行し、以降 AUTO_MOVE_INTERVAL_MS 間隔で繰り返す
-   * 壁・敵に当たると停止する
-   */
-  private startTouchRepeat(): void {
-    if (!this.touchDir) return;
-
-    // 最初の1回を即時実行
-    if (!this.isWaitingForInput || !this.canAutoMoveTo(this.touchDir)) {
-      this.clearTouchState();
       return;
     }
-    this.processPlayerAction(this.touchDir);
 
-    // 繰り返しタイマーを開始する
-    this.touchRepeatEvent = this.time.addEvent({
-      delay: AUTO_MOVE_INTERVAL_MS,
-      loop: true,
-      callback: () => {
-        if (!this.touchDir || !this.isWaitingForInput) return;
-        if (!this.canAutoMoveTo(this.touchDir)) {
-          this.clearTouchState();
-          return;
-        }
-        this.processPlayerAction(this.touchDir);
-      },
-    });
+    const path = BFSPathfinder.findPath(
+      this.player.pos,
+      { x: tileX, y: tileY },
+      this.floor.tiles,
+      this.floor.visibility
+    );
+    if (!path || path.length === 0) return;
+
+    this.bfsPath = path;
+    this.redraw();
+    this.startBfsNavigation();
+  };
+
+  /**
+   * BFS経路の自動移動を開始する
+   * 最初のステップを即時実行し、以降 BFS_MOVE_INTERVAL_MS 間隔で繰り返す
+   */
+  private startBfsNavigation(): void {
+    if (this.bfsPath.length === 0) return;
+
+    this.tickBfsMove();
+
+    if (this.bfsPath.length > 0) {
+      this.bfsMoveEvent = this.time.addEvent({
+        delay: BFS_MOVE_INTERVAL_MS,
+        loop: true,
+        callback: () => {
+          if (!this.isWaitingForInput || this.bfsPath.length === 0) return;
+          this.tickBfsMove();
+        },
+      });
+    }
   }
 
   /**
-   * タッチ/クリック入力の状態をリセットし、保留中のタイマーを解除する
+   * BFS経路の次のステップを1つ実行する
+   * 次のタイルに敵がいれば経路をキャンセルして停止する（攻撃しない）
    */
-  private clearTouchState(): void {
-    this.touchDir = null;
-    this.isAutoMoving = false;
-
-    if (this.touchDelayEvent) {
-      this.touchDelayEvent.remove(false);
-      this.touchDelayEvent = null;
+  private tickBfsMove(): void {
+    if (this.bfsPath.length === 0) {
+      this.clearBfsPath();
+      return;
     }
-    if (this.touchRepeatEvent) {
-      this.touchRepeatEvent.remove(false);
-      this.touchRepeatEvent = null;
+
+    const next = this.bfsPath[0];
+
+    // 次タイルに敵がいれば自動移動を停止する
+    if (this.floor.enemies.some((e) => e.pos.x === next.x && e.pos.y === next.y)) {
+      this.clearBfsPath();
+      return;
+    }
+
+    // 次タイルへの方向を計算して移動する
+    const dx = next.x - this.player.pos.x;
+    const dy = next.y - this.player.pos.y;
+    const dir: Direction = dx === 1 ? 'right' : dx === -1 ? 'left' : dy === 1 ? 'down' : 'up';
+
+    this.bfsPath.shift();
+    this.processPlayerAction(dir);
+  }
+
+  /**
+   * BFS経路と関連タイマーをクリアし、経路表示を消去する
+   */
+  private clearBfsPath(): void {
+    this.bfsPath = [];
+    if (this.bfsMoveEvent) {
+      this.bfsMoveEvent.remove(false);
+      this.bfsMoveEvent = null;
+    }
+    if (this.pathGfx) {
+      this.pathGfx.clear();
+    }
+  }
+
+  /**
+   * BFS経路を半透明のドットで描画する
+   * 通過予定タイルを青色で、目標タイルを明るく強調表示する
+   */
+  private drawBfsPath(): void {
+    this.pathGfx.clear();
+    if (this.bfsPath.length === 0) return;
+
+    for (let i = 0; i < this.bfsPath.length; i++) {
+      const tile = this.bfsPath[i];
+      const px = tile.x * TILE_SIZE;
+      const py = tile.y * TILE_SIZE;
+      const isGoal = i === this.bfsPath.length - 1;
+
+      const size   = isGoal ? 14 : 8;
+      const alpha  = isGoal ? 0.75 : 0.40;
+      const offset = (TILE_SIZE - size) / 2;
+
+      this.pathGfx.fillStyle(0x44aaff, alpha);
+      this.pathGfx.fillRect(px + offset, py + offset, size, size);
     }
   }
 
