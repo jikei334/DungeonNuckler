@@ -11,15 +11,14 @@ const DIRECTIONS: Vec2[] = [
 /** 敵エンティティのAI・状態管理クラス */
 export class Enemy {
   /**
-   * 敵のAIを1ターン更新する（状態遷移・移動）
-   * Phase 4: IDLE（索敵） → CHASE（追跡）を実装
-   * Phase 5以降でTELEGRAPH / EXECUTE / COOLDOWNを追加する
+   * 敵のAIを1ターン更新する（状態遷移・移動・テレグラフカウントダウン）
+   * IDLE → CHASE → TELEGRAPH → EXECUTE → COOLDOWN → CHASE のサイクル
    *
    * @param enemy - 敵データ（in-place更新）
    * @param player - プレイヤーデータ
    * @param tiles - タイルデータ
    * @param allEnemies - 全敵一覧（衝突回避・自身を含む）
-   * @returns 攻撃が発動（EXECUTE）したらtrue（Phase 4では常にfalse）
+   * @returns 攻撃が発動（EXECUTE）したらtrue
    */
   static updateAI(
     enemy: EnemyData,
@@ -29,7 +28,6 @@ export class Enemy {
   ): boolean {
     switch (enemy.state) {
       case 'idle':
-        // プレイヤーを検知したらCHASEへ遷移
         if (Enemy.canDetectPlayer(enemy, player)) {
           enemy.state = 'chase';
           Enemy.runChase(enemy, player, tiles, allEnemies);
@@ -40,13 +38,14 @@ export class Enemy {
         Enemy.runChase(enemy, player, tiles, allEnemies);
         break;
 
-      // Phase 5で実装するステート（現在はフォールスルーのみ）
       case 'telegraph':
-        break;
+        return Enemy.runTelegraph(enemy, player);
 
       case 'execute':
-        // 攻撃実行フラグを返す（Phase 5で CombatSystem が利用）
+        // 攻撃発動：呼び出し元（GameScene）がダメージを処理する
         enemy.state = 'cooldown';
+        enemy.currentCooldown = enemy.cooldownTurns;
+        enemy.telegraph = undefined;
         return true;
 
       case 'cooldown':
@@ -61,8 +60,7 @@ export class Enemy {
   }
 
   /**
-   * CHASE状態の行動：プレイヤーに隣接していればその場で待機、
-   * 離れていれば1マス接近する
+   * CHASE状態の行動：隣接したらTELEGRAPH開始、離れていれば1マス接近する
    *
    * @param enemy - 敵データ（in-place更新）
    * @param player - プレイヤーデータ
@@ -76,12 +74,44 @@ export class Enemy {
     allEnemies: EnemyData[]
   ): void {
     if (Enemy.isAdjacentToPlayer(enemy, player)) {
-      // Phase 4: 隣接時は待機（Phase 5でTELEGRAPH開始に切り替える）
+      // 隣接したらテレグラフを開始する
+      enemy.state = 'telegraph';
+      enemy.telegraph = {
+        targetTiles: Enemy.calculateTelegraphTiles(enemy, player),
+        turnsUntilExecute: enemy.telegraphTurns,
+        pattern: enemy.attackPattern,
+      };
       return;
     }
     const nextPos = Enemy.getNextMove(enemy, player, tiles, allEnemies);
     enemy.pos.x = nextPos.x;
     enemy.pos.y = nextPos.y;
+  }
+
+  /**
+   * TELEGRAPH状態の行動：カウントダウンし、0になったらEXECUTEへ遷移する
+   * プレイヤーが離れても予告を維持する（対象タイルは固定）
+   *
+   * @param enemy - 敵データ（in-place更新）
+   * @param player - プレイヤーデータ（対象タイル再計算用）
+   * @returns EXECUTEに移行した（= 攻撃発動）ならtrue
+   */
+  private static runTelegraph(enemy: EnemyData, player: PlayerData): boolean {
+    if (!enemy.telegraph) {
+      // テレグラフデータが欠損している場合は再生成
+      enemy.telegraph = {
+        targetTiles: Enemy.calculateTelegraphTiles(enemy, player),
+        turnsUntilExecute: enemy.telegraphTurns,
+        pattern: enemy.attackPattern,
+      };
+    }
+
+    enemy.telegraph.turnsUntilExecute--;
+
+    if (enemy.telegraph.turnsUntilExecute <= 0) {
+      enemy.state = 'execute';
+    }
+    return false;
   }
 
   /**

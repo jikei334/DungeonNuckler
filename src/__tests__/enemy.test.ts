@@ -99,13 +99,14 @@ describe('Enemy AI', () => {
       expect(enemy.state).toBe('idle');
     });
 
-    it('CHASEでプレイヤーに隣接したら位置が変わらない（攻撃は Phase 5）', () => {
+    it('CHASEでプレイヤーに隣接したらTELEGRAPH状態になる（Phase 5）', () => {
       const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'chase' });
       const player = makePlayer({ x: 5, y: 4 }); // 真上に隣接
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);
-      expect(enemy.pos).toEqual({ x: 5, y: 5 }); // 動かない
-      expect(enemy.state).toBe('chase');
+      expect(enemy.pos).toEqual({ x: 5, y: 5 }); // 位置は変わらない
+      expect(enemy.state).toBe('telegraph');       // Phase 5: TELEGRAPHへ遷移
+      expect(enemy.telegraph).toBeDefined();
     });
 
     it('EXECUTEはCOOLDOWNに遷移してtrueを返す', () => {
