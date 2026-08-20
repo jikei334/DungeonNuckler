@@ -12,6 +12,14 @@ import {
   LOG_LINES, UI_PANEL_HEIGHT, TIMER_BAR_HEIGHT, MAX_LEVEL,
 } from '../constants';
 
+// --- タッチ/クリック入力定数 ---
+/** 長押し判定までの待機時間(ms) */
+const AUTO_MOVE_INITIAL_DELAY_MS = 300;
+/** 連続移動の間隔(ms)（自然な速度感） */
+const AUTO_MOVE_INTERVAL_MS = 160;
+/** タップ方向の不感帯（ピクセル、プレイヤー中心からこれ以下はタップ無効） */
+const TOUCH_DEAD_ZONE_PX = 8;
+
 // --- 描画色定数 ---
 const C_WALL              = 0x333333;
 const C_FLOOR             = 0x4a4a4a;
@@ -66,6 +74,12 @@ export class GameScene extends Phaser.Scene {
   private isWaitingForInput = false;
   private turnCount = 0;
 
+  // タッチ/クリック入力の状態管理
+  private touchDir: Direction | null = null;
+  private isAutoMoving = false;
+  private touchDelayEvent: Phaser.Time.TimerEvent | null = null;
+  private touchRepeatEvent: Phaser.Time.TimerEvent | null = null;
+
   // キー入力
   private keyW!: Phaser.Input.Keyboard.Key;
   private keyA!: Phaser.Input.Keyboard.Key;
@@ -111,6 +125,10 @@ export class GameScene extends Phaser.Scene {
 
     // キー登録
     this.setupKeys();
+
+    // タッチ/クリック入力を登録
+    this.input.on('pointerdown', this.onPointerDown, this);
+    this.input.on('pointerup', this.onPointerUp, this);
 
     // タブ非アクティブ時にタイマーを一時停止する
     document.addEventListener('visibilitychange', this.onVisibilityChange);
@@ -300,6 +318,7 @@ export class GameScene extends Phaser.Scene {
   private handleGameOver(): void {
     this.timer.stop();
     this.isWaitingForInput = false;
+    this.clearTouchState();
     this.scene.start('GameOverScene', {
       floorNumber: this.floor.floorNumber,
       level: this.player.level,
@@ -637,10 +656,156 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * シーン終了時のクリーンアップ（イベントリスナー解除）
+   * シーン終了時のクリーンアップ（イベントリスナー解除・タッチ状態リセット）
    */
   shutdown(): void {
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.input.off('pointerdown', this.onPointerDown, this);
+    this.input.off('pointerup', this.onPointerUp, this);
+    this.clearTouchState();
+  }
+
+  // --- タッチ/クリック入力 ---
+
+  /**
+   * ポインタ座標からプレイヤー相対の移動方向を計算する
+   * プレイヤー中心から見て水平・垂直の絶対値が大きい軸を方向として選ぶ
+   *
+   * @param pointerX - スクリーン座標X（Phaserポインタ値）
+   * @param pointerY - スクリーン座標Y（Phaserポインタ値）
+   * @returns 移動方向（不感帯内はnull）
+   */
+  private getDirectionFromPointer(pointerX: number, pointerY: number): Direction | null {
+    // カメラのスクロールを加味してワールド座標へ変換
+    const worldX = pointerX + this.cameras.main.scrollX;
+    const worldY = pointerY + this.cameras.main.scrollY;
+
+    // プレイヤーの中心座標（ワールド座標）
+    const cx = this.player.pos.x * TILE_SIZE + TILE_SIZE / 2;
+    const cy = this.player.pos.y * TILE_SIZE + TILE_SIZE / 2;
+
+    const dx = worldX - cx;
+    const dy = worldY - cy;
+
+    // 不感帯：プレイヤー中心に近すぎるタップは無効
+    if (Math.abs(dx) < TOUCH_DEAD_ZONE_PX && Math.abs(dy) < TOUCH_DEAD_ZONE_PX) return null;
+
+    // 絶対値が大きい軸を移動方向として採用
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      return dx > 0 ? 'right' : 'left';
+    }
+    return dy > 0 ? 'down' : 'up';
+  }
+
+  /**
+   * 指定方向への移動が可能か判定する（自動移動用・敵ぶつかりは不可とする）
+   * 壁・マップ外・敵が存在するタイルへの移動は不可
+   *
+   * @param dir - 移動方向
+   * @returns 移動可能ならtrue
+   */
+  private canAutoMoveTo(dir: Direction): boolean {
+    const deltas: Record<Direction, { x: number; y: number }> = {
+      up: { x: 0, y: -1 }, down: { x: 0, y: 1 },
+      left: { x: -1, y: 0 }, right: { x: 1, y: 0 },
+    };
+    const { x: dx, y: dy } = deltas[dir];
+    const nx = this.player.pos.x + dx;
+    const ny = this.player.pos.y + dy;
+
+    // マップ外チェック
+    if (ny < 0 || ny >= this.floor.tiles.length || nx < 0 || nx >= this.floor.tiles[0].length) {
+      return false;
+    }
+    // 壁チェック
+    if (this.floor.tiles[ny][nx] === 'wall') return false;
+    // 敵チェック（自動移動では敵に突入しない）
+    if (this.floor.enemies.some((e) => e.pos.x === nx && e.pos.y === ny)) return false;
+
+    return true;
+  }
+
+  /**
+   * ポインタ押下イベント：方向を記録し、長押し判定タイマーを開始する
+   * @param pointer - Phaserポインタオブジェクト
+   */
+  private onPointerDown = (pointer: Phaser.Input.Pointer): void => {
+    if (!this.isWaitingForInput) return;
+
+    const dir = this.getDirectionFromPointer(pointer.x, pointer.y);
+    if (!dir) return;
+
+    this.touchDir = dir;
+    this.isAutoMoving = false;
+
+    // 長押し判定タイマーを開始する
+    this.touchDelayEvent = this.time.delayedCall(AUTO_MOVE_INITIAL_DELAY_MS, () => {
+      this.isAutoMoving = true;
+      this.startTouchRepeat();
+    });
+  };
+
+  /**
+   * ポインタ離上イベント：短押しなら1回移動、自動移動中なら停止する
+   */
+  private onPointerUp = (): void => {
+    if (this.touchDir === null) return;
+
+    if (!this.isAutoMoving) {
+      // 短押し → 通常の1回移動（敵への攻撃あり）
+      if (this.isWaitingForInput) {
+        this.processPlayerAction(this.touchDir);
+      }
+    }
+
+    this.clearTouchState();
+  };
+
+  /**
+   * 長押し確定後の連続移動ループを開始する
+   * 最初の1マスを即時実行し、以降 AUTO_MOVE_INTERVAL_MS 間隔で繰り返す
+   * 壁・敵に当たると停止する
+   */
+  private startTouchRepeat(): void {
+    if (!this.touchDir) return;
+
+    // 最初の1回を即時実行
+    if (!this.isWaitingForInput || !this.canAutoMoveTo(this.touchDir)) {
+      this.clearTouchState();
+      return;
+    }
+    this.processPlayerAction(this.touchDir);
+
+    // 繰り返しタイマーを開始する
+    this.touchRepeatEvent = this.time.addEvent({
+      delay: AUTO_MOVE_INTERVAL_MS,
+      loop: true,
+      callback: () => {
+        if (!this.touchDir || !this.isWaitingForInput) return;
+        if (!this.canAutoMoveTo(this.touchDir)) {
+          this.clearTouchState();
+          return;
+        }
+        this.processPlayerAction(this.touchDir);
+      },
+    });
+  }
+
+  /**
+   * タッチ/クリック入力の状態をリセットし、保留中のタイマーを解除する
+   */
+  private clearTouchState(): void {
+    this.touchDir = null;
+    this.isAutoMoving = false;
+
+    if (this.touchDelayEvent) {
+      this.touchDelayEvent.remove(false);
+      this.touchDelayEvent = null;
+    }
+    if (this.touchRepeatEvent) {
+      this.touchRepeatEvent.remove(false);
+      this.touchRepeatEvent = null;
+    }
   }
 
   // --- テスト・デバッグ用アクセサ ---
