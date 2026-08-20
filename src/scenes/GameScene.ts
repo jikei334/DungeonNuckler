@@ -4,11 +4,12 @@ import { FogOfWar } from '../dungeon/FogOfWar';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { TimerSystem } from '../systems/TimerSystem';
+import { CombatSystem } from '../systems/CombatSystem';
 import type { DungeonFloor, PlayerData, Direction } from '../types';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
-  LOG_LINES, UI_PANEL_HEIGHT, TIMER_BAR_HEIGHT,
+  LOG_LINES, UI_PANEL_HEIGHT, TIMER_BAR_HEIGHT, MAX_LEVEL,
 } from '../constants';
 
 // --- 描画色定数 ---
@@ -206,10 +207,23 @@ export class GameScene extends Phaser.Scene {
       );
 
       if (bumpedEnemyId) {
-        // バンプアタック（Phase 6で戦闘解決を実装）
+        // バンプアタック：隣接敵に攻撃を実行する
         const enemy = this.floor.enemies.find((e) => e.id === bumpedEnemyId);
         if (enemy) {
-          this.addLog(`${enemy.isBoss ? '【ボス】' : '敵'}に体当たり！（Phase 6で実装）`);
+          const name = enemy.isBoss ? '【ボス】' : '敵';
+          const { damage, killed } = CombatSystem.playerAttack(this.player, enemy);
+          this.addLog(`${name}に${damage}ダメージ！（HP: ${enemy.hp}/${enemy.maxHp}）`);
+
+          if (killed) {
+            // 撃破：敵リストから削除し、EXPを獲得する
+            this.floor.enemies = this.floor.enemies.filter((e) => e.id !== bumpedEnemyId);
+            this.addLog(`${name}を倒した！`);
+            const levelsGained = CombatSystem.gainExp(this.player, enemy.expReward);
+            this.addLog(`EXP +${enemy.expReward}`);
+            if (levelsGained > 0) {
+              this.addLog(`レベルアップ！ Lv.${this.player.level}  ATK: ${this.player.atk}`);
+            }
+          }
         }
       } else if (moved) {
         FogOfWar.updateVisibility(this.player, this.floor);
@@ -306,11 +320,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 上部UIテキスト（フロア・ターン・レベル・ATK）を更新する
+   * 上部UIテキスト（フロア・ターン・レベル・ATK・EXP）を更新する
    */
   private updateUIText(): void {
     this.floorText.setText(`Floor ${this.floor.floorNumber} | Turn ${this.turnCount}`);
-    this.levelText.setText(`Lv.${this.player.level}  ATK: ${this.player.atk}`);
+    const nextExp = CombatSystem.getNextLevelExp(this.player);
+    const expStr = this.player.level >= MAX_LEVEL
+      ? 'MAX'
+      : `${this.player.exp}/${nextExp}`;
+    this.levelText.setText(`Lv.${this.player.level}  ATK: ${this.player.atk}  EXP: ${expStr}`);
   }
 
   /**
