@@ -770,7 +770,17 @@ export class GameScene extends Phaser.Scene {
     if (tileX === this.player.pos.x && tileY === this.player.pos.y) return;
     if (this.floor.tiles[tileY][tileX] === 'wall') return;
     if (this.floor.visibility[tileY][tileX] === 'unseen') return;
-    if (this.floor.enemies.some((e) => e.pos.x === tileX && e.pos.y === tileY)) return;
+    // 敵タイルをクリックした場合：プレイヤーが隣接していれば攻撃、離れていれば無視
+    const clickedEnemy = this.floor.enemies.find((e) => e.pos.x === tileX && e.pos.y === tileY);
+    if (clickedEnemy) {
+      const dx = tileX - this.player.pos.x;
+      const dy = tileY - this.player.pos.y;
+      if (Math.abs(dx) + Math.abs(dy) === 1) {
+        const dir: Direction = dx === 1 ? 'right' : dx === -1 ? 'left' : dy === 1 ? 'down' : 'up';
+        this.processPlayerAction(dir);
+      }
+      return;
+    }
 
     const path = BFSPathfinder.findPath(
       this.player.pos,
