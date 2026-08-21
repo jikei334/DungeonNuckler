@@ -10,11 +10,17 @@ import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
  */
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: VIEWPORT_WIDTH,
-  height: VIEWPORT_HEIGHT,
   backgroundColor: '#000000',
   scene: [TitleScene, GameScene, GameOverScene],
   parent: document.body,
+  // スマホ含む全画面サイズに対応するスケール設定
+  // FIT: アスペクト比を維持しながら親要素に収まるよう CSS スケーリング
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: VIEWPORT_WIDTH,
+    height: VIEWPORT_HEIGHT,
+  },
 };
 
 new Phaser.Game(config);
