@@ -294,8 +294,8 @@ export class DungeonGenerator {
         expReward: BOSS_EXP_REWARD,
       };
     } else {
-      // 雑魚敵HP: フロアが深いほど緩やかに増加
-      const hp = Math.round(BASE_ENEMY_HP * (1 + floorNumber * 0.05));
+      // 雑魚敵HP: フロアが深いほど増加（Floor10まで約3撃、以降も線形スケール）
+      const hp = Math.round(BASE_ENEMY_HP * (1 + floorNumber * 0.1));
       // 深いフロアでは30%の確率で強攻撃パターンを使用
       const useStrongPattern = floorNumber >= 4 && (id.charCodeAt(id.length - 1) % 10) < 3;
       const attackPattern: AttackPattern = useStrongPattern ? 'line' : 'single';

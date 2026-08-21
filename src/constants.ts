@@ -31,8 +31,8 @@ export const MIN_TIME_MS = 1500;
 
 // --- 敵パラメータ ---
 
-/** 雑魚敵の基本HP */
-export const BASE_ENEMY_HP = 3;
+/** 雑魚敵の基本HP（Floor1でATK=2に対して約3撃必要な値） */
+export const BASE_ENEMY_HP = 5;
 /** 雑魚敵の基本攻撃力 */
 export const BASE_ENEMY_ATK = 1;
 /** 雑魚敵の基本防御力 */

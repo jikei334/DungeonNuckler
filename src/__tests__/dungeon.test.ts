@@ -120,6 +120,13 @@ describe('DungeonGenerator', () => {
       expect(floor10.maxHp).toBeGreaterThan(floor1.maxHp);
     });
 
+    it('Floor1 の雑魚HP はプレイヤー初期ATK(2)で3撃必要な値', () => {
+      const enemy = DungeonGenerator.createEnemy('e', { x: 0, y: 0 }, 1, false, 0);
+      const BASE_ATK = 2;
+      // 2ダメージを何回与えれば倒せるか（ceil(hp/atk) >= 3）
+      expect(Math.ceil(enemy.maxHp / BASE_ATK)).toBeGreaterThanOrEqual(3);
+    });
+
     it('敵のHPが0より大きい', () => {
       const enemy = DungeonGenerator.createEnemy('test', { x: 1, y: 1 }, 1, false, 0);
       expect(enemy.hp).toBeGreaterThan(0);
