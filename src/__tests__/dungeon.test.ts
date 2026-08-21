@@ -90,6 +90,18 @@ describe('DungeonGenerator', () => {
     });
   });
 
+  describe('bossDefeated フラグ', () => {
+    it('非ボスフロアは生成時から bossDefeated=true', () => {
+      const floor = DungeonGenerator.generate(1, 42);
+      expect(floor.bossDefeated).toBe(true);
+    });
+
+    it('ボスフロアは生成時 bossDefeated=false', () => {
+      const floor = DungeonGenerator.generate(BOSS_FLOOR_INTERVAL, 42);
+      expect(floor.bossDefeated).toBe(false);
+    });
+  });
+
   describe('createEnemy()', () => {
     it('ボス敵は isBoss=true になっている', () => {
       const boss = DungeonGenerator.createEnemy('boss-1', { x: 5, y: 5 }, 5, true, 1);
@@ -106,6 +118,13 @@ describe('DungeonGenerator', () => {
       const floor1 = DungeonGenerator.createEnemy('e1', { x: 0, y: 0 }, 1, false, 0);
       const floor10 = DungeonGenerator.createEnemy('e10', { x: 0, y: 0 }, 10, false, 0);
       expect(floor10.maxHp).toBeGreaterThan(floor1.maxHp);
+    });
+
+    it('Floor1 の雑魚HP はプレイヤー初期ATK(2)で3撃必要な値', () => {
+      const enemy = DungeonGenerator.createEnemy('e', { x: 0, y: 0 }, 1, false, 0);
+      const BASE_ATK = 2;
+      // 2ダメージを何回与えれば倒せるか（ceil(hp/atk) >= 3）
+      expect(Math.ceil(enemy.maxHp / BASE_ATK)).toBeGreaterThanOrEqual(3);
     });
 
     it('敵のHPが0より大きい', () => {
