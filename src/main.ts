@@ -1,15 +1,19 @@
 import Phaser from 'phaser';
+import { TitleScene } from './scenes/TitleScene';
+import { GameScene } from './scenes/GameScene';
+import { GameOverScene } from './scenes/GameOverScene';
+import { VIEWPORT_WIDTH, VIEWPORT_HEIGHT } from './constants';
 
 /**
- * Phaser.Gameのエントリーポイント
- * シーンは後続フェーズで追加する
+ * Phaser.Game のエントリーポイント
+ * シーン: TitleScene → GameScene → GameOverScene → TitleScene
  */
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 800,
-  height: 600,
+  width: VIEWPORT_WIDTH,
+  height: VIEWPORT_HEIGHT,
   backgroundColor: '#000000',
-  scene: [],
+  scene: [TitleScene, GameScene, GameOverScene],
   parent: document.body,
 };
 
