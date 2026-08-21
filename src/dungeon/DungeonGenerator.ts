@@ -58,6 +58,8 @@ export class DungeonGenerator {
       stairsPos,
       enemies,
       rooms,
+      // ボスフロアではボス撃破まで階段が出現しない
+      bossDefeated: !DungeonGenerator.isBossFloor(floorNumber),
     };
   }
 

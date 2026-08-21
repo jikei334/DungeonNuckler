@@ -292,17 +292,26 @@ export class GameScene extends Phaser.Scene {
               this.addLog(`レベルアップ！ Lv.${this.player.level}  ATK: ${this.player.atk}`);
               this.showLevelUpEffect();
             }
+            // ボスフロアでボスを倒したら階段を出現させる
+            if (enemy.isBoss && !this.floor.bossDefeated) {
+              this.floor.bossDefeated = true;
+              this.addLog('封印が解けた！階段が現れた！');
+            }
           }
         }
       } else if (moved) {
         FogOfWar.updateVisibility(this.player, this.floor);
 
-        // 階段チェック：踏んだ瞬間に次フロアへ遷移する
+        // 階段チェック：ボス未撃破なら通過できない
         const { stairsPos } = this.floor;
         if (this.player.pos.x === stairsPos.x && this.player.pos.y === stairsPos.y) {
-          this.redraw();
-          this.goToNextFloor();
-          return; // 敵ターンは発生させない
+          if (!this.floor.bossDefeated) {
+            this.addLog('ボスを倒すまで先へは進めない！');
+          } else {
+            this.redraw();
+            this.goToNextFloor();
+            return; // 敵ターンは発生させない
+          }
         }
       }
     }
@@ -480,12 +489,15 @@ export class GameScene extends Phaser.Scene {
           continue;
         }
 
+        // ボスフロアでボス未撃破の場合、階段タイルを床として描画する
+        const effectiveTile = (!this.floor.bossDefeated && tile === 'stairs') ? 'floor' : tile;
+
         // 視界内と探索済みで明確に異なる色を直接使用（オーバーレイ方式より識別しやすい）
         let color: number;
         if (vis === 'visible') {
-          color = tile === 'wall' ? C_WALL_VISIBLE : tile === 'stairs' ? C_STAIRS_VISIBLE : C_FLOOR_VISIBLE;
+          color = effectiveTile === 'wall' ? C_WALL_VISIBLE : effectiveTile === 'stairs' ? C_STAIRS_VISIBLE : C_FLOOR_VISIBLE;
         } else {
-          color = tile === 'wall' ? C_WALL_EXPLORED : tile === 'stairs' ? C_STAIRS_EXPLORED : C_FLOOR_EXPLORED;
+          color = effectiveTile === 'wall' ? C_WALL_EXPLORED : effectiveTile === 'stairs' ? C_STAIRS_EXPLORED : C_FLOOR_EXPLORED;
         }
 
         this.tileGfx.fillStyle(color, 1);

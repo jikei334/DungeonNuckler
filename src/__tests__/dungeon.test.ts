@@ -90,6 +90,18 @@ describe('DungeonGenerator', () => {
     });
   });
 
+  describe('bossDefeated フラグ', () => {
+    it('非ボスフロアは生成時から bossDefeated=true', () => {
+      const floor = DungeonGenerator.generate(1, 42);
+      expect(floor.bossDefeated).toBe(true);
+    });
+
+    it('ボスフロアは生成時 bossDefeated=false', () => {
+      const floor = DungeonGenerator.generate(BOSS_FLOOR_INTERVAL, 42);
+      expect(floor.bossDefeated).toBe(false);
+    });
+  });
+
   describe('createEnemy()', () => {
     it('ボス敵は isBoss=true になっている', () => {
       const boss = DungeonGenerator.createEnemy('boss-1', { x: 5, y: 5 }, 5, true, 1);

@@ -84,4 +84,6 @@ export interface DungeonFloor {
   stairsPos: Vec2;
   enemies: EnemyData[];
   rooms: Room[];
+  /** ボスフロアでボスが倒されたか（非ボスフロアは常にtrue） */
+  bossDefeated: boolean;
 }
