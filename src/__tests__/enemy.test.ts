@@ -14,6 +14,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     def: 0,
     state: 'idle',
     isBoss: false,
+    variant: 0,
     detectionRange: ENEMY_DETECTION_RANGE,
     telegraphTurns: TELEGRAPH_TURNS_NORMAL,
     attackPattern: 'single',

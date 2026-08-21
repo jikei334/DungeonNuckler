@@ -48,6 +48,8 @@ export interface EnemyData {
   state: EnemyState;
   telegraph?: EnemyAttackTelegraph;
   isBoss: boolean;
+  /** 見た目バリアント（0=円, 1=ひし形, 2=星型） */
+  variant: 0 | 1 | 2;
   /** 索敵範囲（タイル数） */
   detectionRange: number;
   /** テレグラフ開始ターン数 */

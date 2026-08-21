@@ -108,6 +108,10 @@ export class GameScene extends Phaser.Scene {
   private bfsPath: Vec2[] = [];
   private bfsMoveEvent: Phaser.Time.TimerEvent | null = null;
 
+  // 攻撃アニメーション（プレイヤーが攻撃した方向と開始時刻）
+  private attackAnim: { dx: number; dy: number; startTime: number } | null = null;
+  private static readonly ATTACK_ANIM_MS = 220;
+
   // キー入力
   private keyW!: Phaser.Input.Keyboard.Key;
   private keyA!: Phaser.Input.Keyboard.Key;
@@ -273,6 +277,13 @@ export class GameScene extends Phaser.Scene {
         // バンプアタック：隣接敵に攻撃を実行する
         const enemy = this.floor.enemies.find((e) => e.id === bumpedEnemyId);
         if (enemy) {
+          // 攻撃アニメーション：プレイヤーを敵方向へ一瞬スライドさせる
+          const DIRS: Record<Direction, { dx: number; dy: number }> = {
+            up: { dx: 0, dy: -1 }, down: { dx: 0, dy: 1 },
+            left: { dx: -1, dy: 0 }, right: { dx: 1, dy: 0 },
+          };
+          this.attackAnim = { ...DIRS[action], startTime: this.time.now };
+
           const name = enemy.isBoss ? '【ボス】' : '敵';
           const { damage, killed } = CombatSystem.playerAttack(this.player, enemy);
           this.addLog(`${name}に${damage}ダメージ！（HP: ${enemy.hp}/${enemy.maxHp}）`);
@@ -558,6 +569,7 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * プレイヤーと敵を描画する（視界外の敵は非表示）
+   * 毎フレーム呼ばれ、ボブアニメーションと攻撃アニメーションを反映する
    */
   private drawEntities(): void {
     this.entityGfx.clear();
@@ -566,22 +578,96 @@ export class GameScene extends Phaser.Scene {
       const vis = this.floor.visibility[enemy.pos.y]?.[enemy.pos.x];
       if (vis !== 'visible') continue;
 
-      const px = enemy.pos.x * TILE_SIZE;
-      const py = enemy.pos.y * TILE_SIZE;
+      const tx = enemy.pos.x * TILE_SIZE + TILE_SIZE / 2;
+      const ty = enemy.pos.y * TILE_SIZE + TILE_SIZE / 2;
+      const bob = this.getBobOffset(enemy.id);
+      const cy = ty + bob;
       const color = enemy.isBoss ? C_ENEMY_BOSS : C_ENEMY;
-      const pad = enemy.isBoss ? 2 : 5;
 
       this.entityGfx.fillStyle(color, 1);
-      this.entityGfx.fillRect(px + pad, py + pad, TILE_SIZE - pad * 2, TILE_SIZE - pad * 2);
-      this.drawEnemyHpBar(px, py, enemy.hp, enemy.maxHp);
+      if (enemy.isBoss) {
+        // ボス：大きなひし形
+        this.drawDiamond(tx, cy, 10, 12);
+      } else {
+        switch (enemy.variant) {
+          case 0: this.entityGfx.fillCircle(tx, cy, 7); break;
+          case 1: this.drawDiamond(tx, cy, 7, 8); break;
+          case 2: this.drawStar(tx, cy, 8, 4); break;
+        }
+      }
+
+      this.drawEnemyHpBar(enemy.pos.x * TILE_SIZE, enemy.pos.y * TILE_SIZE, enemy.hp, enemy.maxHp);
     }
 
-    // プレイヤー
-    const px = this.player.pos.x * TILE_SIZE;
-    const py = this.player.pos.y * TILE_SIZE;
+    // プレイヤー（攻撃アニメーション適用）
+    let offsetX = 0;
+    let offsetY = 0;
+    if (this.attackAnim) {
+      const elapsed = this.time.now - this.attackAnim.startTime;
+      if (elapsed < GameScene.ATTACK_ANIM_MS) {
+        const t = elapsed / GameScene.ATTACK_ANIM_MS;
+        const push = Math.sin(t * Math.PI) * 7; // 0→最大7px→0
+        offsetX = this.attackAnim.dx * push;
+        offsetY = this.attackAnim.dy * push;
+      } else {
+        this.attackAnim = null;
+      }
+    }
+    const px = this.player.pos.x * TILE_SIZE + TILE_SIZE / 2 + offsetX;
+    const py = this.player.pos.y * TILE_SIZE + TILE_SIZE / 2 + this.getBobOffset('player') + offsetY;
+    const half = 7;
     this.entityGfx.fillStyle(C_PLAYER, 1);
-    this.entityGfx.fillRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
-    this.drawFacingIndicator(px, py);
+    this.entityGfx.fillRect(px - half, py - half, half * 2, half * 2);
+    this.drawFacingIndicator(
+      this.player.pos.x * TILE_SIZE + offsetX,
+      this.player.pos.y * TILE_SIZE + offsetY + this.getBobOffset('player'),
+    );
+  }
+
+  /**
+   * 上下にゆらゆら動くボブオフセットを返す（エンティティごとに位相をずらす）
+   * @param seed - 位相のシード文字列（エンティティIDなど）
+   * @returns Y方向オフセット（ピクセル）
+   */
+  private getBobOffset(seed: string): number {
+    const phase = seed.split('').reduce((a, c) => a + c.charCodeAt(0), 0) * 0.7;
+    return Math.sin(this.time.now / 370 + phase) * 2.5;
+  }
+
+  /**
+   * ひし形（ロタート45°の矩形）を描画する
+   * @param cx - 中心X
+   * @param cy - 中心Y
+   * @param hw - 半幅
+   * @param hh - 半高さ
+   */
+  private drawDiamond(cx: number, cy: number, hw: number, hh: number): void {
+    const g = this.entityGfx;
+    g.fillTriangle(cx, cy - hh, cx + hw, cy, cx - hw, cy);
+    g.fillTriangle(cx - hw, cy, cx + hw, cy, cx, cy + hh);
+  }
+
+  /**
+   * 5角星を描画する
+   * @param cx - 中心X
+   * @param cy - 中心Y
+   * @param outerR - 外接円半径
+   * @param innerR - 内接円半径
+   */
+  private drawStar(cx: number, cy: number, outerR: number, innerR: number): void {
+    const g = this.entityGfx;
+    const pts = 5;
+    g.beginPath();
+    for (let i = 0; i < pts * 2; i++) {
+      const r = i % 2 === 0 ? outerR : innerR;
+      const angle = (i * Math.PI / pts) - Math.PI / 2;
+      const x = cx + r * Math.cos(angle);
+      const y = cy + r * Math.sin(angle);
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.closePath();
+    g.fillPath();
   }
 
   /**
@@ -757,6 +843,9 @@ export class GameScene extends Phaser.Scene {
    * ・キー入力検知
    */
   update(): void {
+    // エンティティを毎フレーム再描画してボブ・攻撃アニメーションを滑らかにする
+    this.drawEntities();
+
     // タイマーバーは常時更新（入力待ち中のみ）
     if (this.isWaitingForInput) {
       this.drawTimerBar();

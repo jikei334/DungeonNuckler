@@ -275,6 +275,10 @@ export class DungeonGenerator {
     isBoss: boolean,
     bossIndex: number
   ): EnemyData {
+    // IDの文字コード合計から3種類のバリアントを決定（ボスは常に0）
+    const idHash = id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    const variant = (idHash % 3) as 0 | 1 | 2;
+
     if (isBoss) {
       const hp = Math.round(BOSS_BASE_HP * Math.pow(BOSS_GROWTH_RATE, Math.max(0, bossIndex - 1)));
       return {
@@ -286,6 +290,7 @@ export class DungeonGenerator {
         def: Math.floor(floorNumber / 5),
         state: 'idle',
         isBoss: true,
+        variant: 0,
         detectionRange: ENEMY_DETECTION_RANGE + 2,
         telegraphTurns: TELEGRAPH_TURNS_BOSS,
         attackPattern: 'cross',
@@ -310,6 +315,7 @@ export class DungeonGenerator {
         def: BASE_ENEMY_DEF,
         state: 'idle',
         isBoss: false,
+        variant,
         detectionRange: ENEMY_DETECTION_RANGE,
         telegraphTurns,
         attackPattern,
