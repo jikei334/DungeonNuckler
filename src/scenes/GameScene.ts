@@ -110,7 +110,7 @@ export class GameScene extends Phaser.Scene {
 
   // 攻撃アニメーション（プレイヤーが攻撃した方向と開始時刻）
   private attackAnim: { dx: number; dy: number; startTime: number } | null = null;
-  private static readonly ATTACK_ANIM_MS = 220;
+  private static readonly ATTACK_ANIM_MS = 120;
 
   // キー入力
   private keyW!: Phaser.Input.Keyboard.Key;
@@ -631,7 +631,7 @@ export class GameScene extends Phaser.Scene {
    */
   private getBobOffset(seed: string): number {
     const phase = seed.split('').reduce((a, c) => a + c.charCodeAt(0), 0) * 0.7;
-    return Math.sin(this.time.now / 370 + phase) * 2.5;
+    return Math.sin(this.time.now / 180 + phase) * 2.5;
   }
 
   /**
