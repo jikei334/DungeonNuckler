@@ -2,12 +2,24 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>ダンジョンナックラー</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
-    canvas { display: block; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #000;
+      overflow: hidden;
+      /* タッチ操作でのスクロール・ピンチズームを無効化 */
+      touch-action: none;
+    }
+    body { display: flex; justify-content: center; align-items: center; }
+    canvas {
+      display: block;
+      /* Phaser の FIT スケーリングが機能するよう最大幅を制限 */
+      max-width: 100%;
+      max-height: 100%;
+    }
   </style>
 </head>
 <body>
