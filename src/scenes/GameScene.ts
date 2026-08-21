@@ -46,12 +46,16 @@ const C_TELEGRAPH_DANGER  = 0xdd2200;  // テレグラフ最終ターン色（�
 const ALPHA_TELEGRAPH     = 0.40;      // テレグラフ通常アルファ
 const ALPHA_TELEGRAPH_MAX = 0.72;      // テレグラフ最終ターン最大アルファ
 
-/** タイマーバーのY座標（上部UIの下） */
-const TIMER_BAR_Y = 48;
+/** タイマーバーのY座標 */
+const TIMER_BAR_Y = 54;
 /** タイマーバーのX余白 */
 const TIMER_BAR_MARGIN = 8;
 /** タイマーバーの幅 */
 const TIMER_BAR_WIDTH = VIEWPORT_WIDTH - TIMER_BAR_MARGIN * 2;
+/** EXPバーのY座標（レベルテキストとタイマーバーの間） */
+const EXP_BAR_Y = 42;
+/** EXPバーの高さ */
+const EXP_BAR_HEIGHT = 4;
 
 /** フロア遷移時に引き継ぐプレイヤーの永続ステータス */
 interface SavedPlayer {
@@ -193,11 +197,11 @@ export class GameScene extends Phaser.Scene {
     };
 
     // フロア番号（左上）
-    this.floorText = this.add.text(TIMER_BAR_MARGIN, 8, '', { ...baseStyle, color: '#aaffff' })
+    this.floorText = this.add.text(TIMER_BAR_MARGIN, 6, '', { ...baseStyle, color: '#aaffff' })
       .setScrollFactor(0).setDepth(100);
 
-    // レベル・ATK（フロアの右隣）
-    this.levelText = this.add.text(TIMER_BAR_MARGIN, 28, '', baseStyle)
+    // レベル・ATK・EXP（フロアの右隣）
+    this.levelText = this.add.text(TIMER_BAR_MARGIN, 22, '', baseStyle)
       .setScrollFactor(0).setDepth(100);
 
     // タイマーラベル（タイマーバーの右端）
@@ -273,6 +277,11 @@ export class GameScene extends Phaser.Scene {
           const { damage, killed } = CombatSystem.playerAttack(this.player, enemy);
           this.addLog(`${name}に${damage}ダメージ！（HP: ${enemy.hp}/${enemy.maxHp}）`);
 
+          // 敵タイルの中央上部にダメージ数値を浮かせる
+          const ex = enemy.pos.x * TILE_SIZE + TILE_SIZE / 2;
+          const ey = enemy.pos.y * TILE_SIZE;
+          this.showFloatingText(ex, ey, `-${damage}`, '#ff4444');
+
           if (killed) {
             // 撃破：敵リストから削除し、EXPを獲得する
             this.floor.enemies = this.floor.enemies.filter((e) => e.id !== bumpedEnemyId);
@@ -281,6 +290,7 @@ export class GameScene extends Phaser.Scene {
             this.addLog(`EXP +${enemy.expReward}`);
             if (levelsGained > 0) {
               this.addLog(`レベルアップ！ Lv.${this.player.level}  ATK: ${this.player.atk}`);
+              this.showLevelUpEffect();
             }
           }
         }
@@ -342,6 +352,12 @@ export class GameScene extends Phaser.Scene {
         if (hit) {
           Player.takeDamage(this.player, 1);
           this.addLog(`${name}の攻撃が命中！ HP残り ${this.player.hp}/${this.player.maxHp}`);
+
+          // 被弾演出：画面フラッシュ＋カメラ揺れ＋ダメージ数値
+          this.showDamageFlash();
+          const ppx = this.player.pos.x * TILE_SIZE + TILE_SIZE / 2;
+          const ppy = this.player.pos.y * TILE_SIZE;
+          this.showFloatingText(ppx, ppy, '-1', '#ff8888');
 
           if (!Player.isAlive(this.player)) {
             this.handleGameOver();
@@ -608,7 +624,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * UIオーバーレイ（上部パネル・ログパネル・HPハート）を描画する
+   * UIオーバーレイ（上部パネル・ログパネル・HPハート・EXPバー）を描画する
    */
   private drawUIOverlay(): void {
     this.uiGfx.clear();
@@ -622,6 +638,28 @@ export class GameScene extends Phaser.Scene {
     this.uiGfx.fillRect(0, VIEWPORT_HEIGHT - UI_PANEL_HEIGHT, VIEWPORT_WIDTH, UI_PANEL_HEIGHT);
 
     this.drawHpHearts();
+    this.drawExpBar();
+  }
+
+  /**
+   * EXPバーを描画する（レベルテキストとタイマーバーの間に配置）
+   * 最大レベル時は満タン表示
+   */
+  private drawExpBar(): void {
+    const ratio = this.player.level >= MAX_LEVEL
+      ? 1
+      : this.player.exp / CombatSystem.getNextLevelExp(this.player);
+    const barW = Math.round(TIMER_BAR_WIDTH * Math.min(ratio, 1));
+
+    // バー背景
+    this.uiGfx.fillStyle(0x111133, 1);
+    this.uiGfx.fillRect(TIMER_BAR_MARGIN, EXP_BAR_Y, TIMER_BAR_WIDTH, EXP_BAR_HEIGHT);
+
+    // バー前景（青色）
+    if (barW > 0) {
+      this.uiGfx.fillStyle(0x2255dd, 1);
+      this.uiGfx.fillRect(TIMER_BAR_MARGIN, EXP_BAR_Y, barW, EXP_BAR_HEIGHT);
+    }
   }
 
   /**
@@ -878,6 +916,65 @@ export class GameScene extends Phaser.Scene {
       this.pathGfx.fillStyle(0x44aaff, alpha);
       this.pathGfx.fillRect(px + offset, py + offset, size, size);
     }
+  }
+
+  // --- 演出エフェクト ---
+
+  /**
+   * 被弾演出：画面を赤くフラッシュしカメラを揺らす
+   */
+  private showDamageFlash(): void {
+    this.cameras.main.shake(120, 0.008);
+    this.cameras.main.flash(180, 200, 0, 0, true);
+  }
+
+  /**
+   * レベルアップ演出：金色フラッシュ＋中央に "LEVEL UP!" テキストを浮かせる
+   */
+  private showLevelUpEffect(): void {
+    this.cameras.main.flash(300, 255, 200, 0, true);
+    const cx = VIEWPORT_WIDTH / 2;
+    const cy = VIEWPORT_HEIGHT / 2;
+    const txt = this.add.text(cx, cy, 'LEVEL UP!', {
+      fontSize: '28px',
+      color: '#ffdd00',
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+    }).setScrollFactor(0).setDepth(300).setOrigin(0.5);
+
+    this.tweens.add({
+      targets: txt,
+      y: cy - 48,
+      alpha: 0,
+      duration: 1200,
+      ease: 'Power2',
+      onComplete: () => txt.destroy(),
+    });
+  }
+
+  /**
+   * ワールド座標にフローティングテキストを表示して上方向へ消える演出を行う
+   * @param worldX - テキスト表示ワールドX座標（中心）
+   * @param worldY - テキスト表示ワールドY座標（下端）
+   * @param text - 表示する文字列
+   * @param color - テキスト色（'#rrggbb' 形式）
+   */
+  private showFloatingText(worldX: number, worldY: number, text: string, color: string): void {
+    const txt = this.add.text(worldX, worldY, text, {
+      fontSize: '16px',
+      color,
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+    }).setOrigin(0.5, 1).setDepth(200);
+
+    this.tweens.add({
+      targets: txt,
+      y: worldY - 36,
+      alpha: 0,
+      duration: 600,
+      ease: 'Power1',
+      onComplete: () => txt.destroy(),
+    });
   }
 
   // --- テスト・デバッグ用アクセサ ---

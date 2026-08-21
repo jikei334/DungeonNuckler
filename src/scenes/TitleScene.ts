@@ -92,13 +92,19 @@ export class TitleScene extends Phaser.Scene {
     }
 
     // 操作ガイド
-    this.add.text(cx, cy + 170, 'WASD / 矢印キー: 移動　スペース/Enter: 待機', {
+    this.add.text(cx, cy + 162, 'WASD / 矢印キー: 移動　スペース/Enter: 待機', {
       fontSize: '13px',
       color: '#556677',
       fontFamily: 'monospace',
     }).setOrigin(0.5);
 
-    this.add.text(cx, cy + 190, '敵の攻撃予告を読んで、危険なマスから逃げろ！', {
+    this.add.text(cx, cy + 178, 'クリック/タップ: 見えているマスへ自動移動', {
+      fontSize: '13px',
+      color: '#556677',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5);
+
+    this.add.text(cx, cy + 198, '敵の攻撃予告を読んで、危険なマスから逃げろ！', {
       fontSize: '13px',
       color: '#556677',
       fontFamily: 'monospace',
