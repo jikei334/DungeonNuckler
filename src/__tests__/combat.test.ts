@@ -24,6 +24,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     isBoss: false,
     variant: 0,
     detectionRange: 5,
+    facing: 'down' as const,
     attackPatterns: [{ name: 'single', telegraphTurns: 1, cooldownTurns: 0 }],
     currentCooldown: 0,
     expReward: 10,
