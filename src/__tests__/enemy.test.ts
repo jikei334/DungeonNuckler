@@ -17,7 +17,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     variant: 0,
     detectionRange: ENEMY_DETECTION_RANGE,
     telegraphTurns: TELEGRAPH_TURNS_NORMAL,
-    attackPattern: 'single',
+    attackPatterns: ['single'],
     cooldownTurns: 1,
     currentCooldown: 0,
     expReward: 10,
@@ -197,17 +197,17 @@ describe('Enemy AI', () => {
 
   describe('calculateTelegraphTiles()', () => {
     it('single パターンはプレイヤー位置を1マス返す', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, attackPattern: 'single' });
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 } });
       const player = makePlayer({ x: 5, y: 3 });
-      const tiles = Enemy.calculateTelegraphTiles(enemy, player);
+      const tiles = Enemy.calculateTelegraphTiles(enemy, player, 'single');
       expect(tiles).toHaveLength(1);
       expect(tiles[0]).toEqual({ x: 5, y: 3 });
     });
 
     it('cross パターンは5マス返す（プレイヤー＋上下左右）', () => {
-      const enemy = makeEnemy({ pos: { x: 0, y: 0 }, attackPattern: 'cross' });
+      const enemy = makeEnemy({ pos: { x: 0, y: 0 } });
       const player = makePlayer({ x: 5, y: 5 });
-      const tiles = Enemy.calculateTelegraphTiles(enemy, player);
+      const tiles = Enemy.calculateTelegraphTiles(enemy, player, 'cross');
       expect(tiles).toHaveLength(5);
       expect(tiles).toContainEqual({ x: 5, y: 5 });
       expect(tiles).toContainEqual({ x: 5, y: 4 });
@@ -215,18 +215,18 @@ describe('Enemy AI', () => {
     });
 
     it('line パターンは3マス返す（プレイヤー方向）', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 10 }, attackPattern: 'line' });
+      const enemy = makeEnemy({ pos: { x: 5, y: 10 } });
       const player = makePlayer({ x: 5, y: 5 }); // 上方向
-      const tiles = Enemy.calculateTelegraphTiles(enemy, player);
+      const tiles = Enemy.calculateTelegraphTiles(enemy, player, 'line');
       expect(tiles).toHaveLength(3);
       // 上方向の直線（y 9, 8, 7）
       expect(tiles).toContainEqual({ x: 5, y: 9 });
     });
 
     it('area パターンは9マス返す（プレイヤー周辺3×3）', () => {
-      const enemy = makeEnemy({ pos: { x: 0, y: 0 }, attackPattern: 'area' });
+      const enemy = makeEnemy({ pos: { x: 0, y: 0 } });
       const player = makePlayer({ x: 5, y: 5 });
-      const tiles = Enemy.calculateTelegraphTiles(enemy, player);
+      const tiles = Enemy.calculateTelegraphTiles(enemy, player, 'area');
       expect(tiles).toHaveLength(9);
     });
   });

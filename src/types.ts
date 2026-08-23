@@ -54,8 +54,8 @@ export interface EnemyData {
   detectionRange: number;
   /** テレグラフ開始ターン数 */
   telegraphTurns: number;
-  /** 攻撃パターン */
-  attackPattern: AttackPattern;
+  /** 攻撃パターン候補一覧（テレグラフ開始時にランダム選択） */
+  attackPatterns: AttackPattern[];
   /** クールダウン期間（ターン数） */
   cooldownTurns: number;
   /** 現在のクールダウン残り */

@@ -13,7 +13,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     variant: 0,
     detectionRange: 8,
     telegraphTurns: 2,
-    attackPattern: 'single',
+    attackPatterns: ['single'],
     cooldownTurns: 1,
     currentCooldown: 0,
     expReward: 10,
@@ -57,7 +57,7 @@ describe('Telegraph System', () => {
     });
 
     it('テレグラフの対象タイルが記録される', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 6 }, state: 'chase', attackPattern: 'single' });
+      const enemy = makeEnemy({ pos: { x: 5, y: 6 }, state: 'chase', attackPatterns: ['single'] });
       const player = makePlayer({ x: 5, y: 5 });
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);
@@ -143,7 +143,7 @@ describe('Telegraph System', () => {
 
     it('crossパターンのボスは5タイルをマーキングする', () => {
       const boss = makeEnemy({
-        isBoss: true, telegraphTurns: 3, attackPattern: 'cross',
+        isBoss: true, telegraphTurns: 3, attackPatterns: ['cross'],
         pos: { x: 5, y: 6 }, state: 'chase',
       });
       const player = makePlayer({ x: 5, y: 5 });
