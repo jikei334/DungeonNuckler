@@ -31,25 +31,13 @@ export const MIN_TIME_MS = 1500;
 
 // --- 敵パラメータ ---
 
-/** 雑魚敵の基本HP（Floor1でATK=2に対して約3撃必要な値） */
-export const BASE_ENEMY_HP = 5;
-/** 雑魚敵の基本攻撃力 */
-export const BASE_ENEMY_ATK = 1;
-/** 雑魚敵の基本防御力 */
-export const BASE_ENEMY_DEF = 0;
-/** 雑魚敵撃破時のEXP獲得量 */
-export const ENEMY_EXP_REWARD = 10;
-/** 敵の索敵範囲（タイル数） */
+/** 敵の索敵範囲（タイル数）：アーキタイプの detectionRange の基準値 */
 export const ENEMY_DETECTION_RANGE = 8;
 
-/** ボスフロアの間隔（N階ごとにボス） */
+/** 中ボス（boss）の出現フロア間隔（5の倍数: 5, 15, 25...） */
 export const BOSS_FLOOR_INTERVAL = 5;
-/** ボスの基本HP */
-export const BOSS_BASE_HP = 15;
-/** ボスのHP成長率（ボスIndex-1乗する） */
-export const BOSS_GROWTH_RATE = 1.5;
-/** ボス撃破時のEXP獲得量 */
-export const BOSS_EXP_REWARD = 50;
+/** 大ボス（overlord）の出現フロア間隔（10の倍数: 10, 20, 30...） */
+export const MAJOR_BOSS_FLOOR_INTERVAL = 10;
 
 // --- テレグラフ予告ターン数 ---
 

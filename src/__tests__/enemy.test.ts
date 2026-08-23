@@ -14,6 +14,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     def: 0,
     state: 'idle',
     isBoss: false,
+    category: 'minion' as const,
     variant: 0,
     detectionRange: ENEMY_DETECTION_RANGE,
     facing: 'down' as const,

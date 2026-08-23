@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { DungeonGenerator } from '../dungeon/DungeonGenerator';
-import { MAP_WIDTH, MAP_HEIGHT, BOSS_FLOOR_INTERVAL } from '../constants';
+import { ENEMY_ARCHETYPES } from '../dungeon/EnemyArchetypes';
+import { MAP_WIDTH, MAP_HEIGHT, BOSS_FLOOR_INTERVAL, MAJOR_BOSS_FLOOR_INTERVAL } from '../constants';
 
 /**
  * DungeonGeneratorのテスト
@@ -90,47 +91,112 @@ describe('DungeonGenerator', () => {
     });
   });
 
+  describe('isOverlordFloor()', () => {
+    it('MAJOR_BOSS_FLOOR_INTERVAL の倍数で大ボスフロアになる', () => {
+      expect(DungeonGenerator.isOverlordFloor(MAJOR_BOSS_FLOOR_INTERVAL)).toBe(true);
+      expect(DungeonGenerator.isOverlordFloor(MAJOR_BOSS_FLOOR_INTERVAL * 2)).toBe(true);
+    });
+
+    it('5の倍数でも10の倍数でなければ大ボスフロアではない', () => {
+      expect(DungeonGenerator.isOverlordFloor(5)).toBe(false);
+      expect(DungeonGenerator.isOverlordFloor(15)).toBe(false);
+    });
+  });
+
+  describe('isMinorBossFloor()', () => {
+    it('5の倍数かつ10の倍数でないフロアが中ボスフロア', () => {
+      expect(DungeonGenerator.isMinorBossFloor(5)).toBe(true);
+      expect(DungeonGenerator.isMinorBossFloor(15)).toBe(true);
+    });
+
+    it('10の倍数は中ボスフロアではない（大ボスフロア）', () => {
+      expect(DungeonGenerator.isMinorBossFloor(10)).toBe(false);
+      expect(DungeonGenerator.isMinorBossFloor(20)).toBe(false);
+    });
+  });
+
   describe('bossDefeated フラグ', () => {
     it('非ボスフロアは生成時から bossDefeated=true', () => {
       const floor = DungeonGenerator.generate(1, 42);
       expect(floor.bossDefeated).toBe(true);
     });
 
-    it('ボスフロアは生成時 bossDefeated=false', () => {
+    it('中ボスフロアは生成時 bossDefeated=false', () => {
       const floor = DungeonGenerator.generate(BOSS_FLOOR_INTERVAL, 42);
+      expect(floor.bossDefeated).toBe(false);
+    });
+
+    it('大ボスフロアは生成時 bossDefeated=false', () => {
+      const floor = DungeonGenerator.generate(MAJOR_BOSS_FLOOR_INTERVAL, 42);
       expect(floor.bossDefeated).toBe(false);
     });
   });
 
-  describe('createEnemy()', () => {
-    it('ボス敵は isBoss=true になっている', () => {
-      const boss = DungeonGenerator.createEnemy('boss-1', { x: 5, y: 5 }, 5, true, 1);
-      expect(boss.isBoss).toBe(true);
+  describe('createEnemyFromArchetype()', () => {
+    it('overlordアーキタイプは isBoss=true かつ category=overlord になっている', () => {
+      const arch = ENEMY_ARCHETYPES.find((a) => a.category === 'overlord')!;
+      const enemy = DungeonGenerator.createEnemyFromArchetype('test', { x: 0, y: 0 }, arch, 10);
+      expect(enemy.isBoss).toBe(true);
+      expect(enemy.category).toBe('overlord');
     });
 
-    it('ボスのHPが雑魚より高い', () => {
-      const boss = DungeonGenerator.createEnemy('boss', { x: 0, y: 0 }, 5, true, 1);
-      const regular = DungeonGenerator.createEnemy('reg', { x: 0, y: 0 }, 5, false, 0);
-      expect(boss.maxHp).toBeGreaterThan(regular.maxHp);
+    it('bossアーキタイプは isBoss=true かつ category=boss になっている', () => {
+      const arch = ENEMY_ARCHETYPES.find((a) => a.category === 'boss')!;
+      const enemy = DungeonGenerator.createEnemyFromArchetype('test', { x: 0, y: 0 }, arch, 5);
+      expect(enemy.isBoss).toBe(true);
+      expect(enemy.category).toBe('boss');
     });
 
-    it('フロア番号が高いほど雑魚のHPが増加する', () => {
-      const floor1 = DungeonGenerator.createEnemy('e1', { x: 0, y: 0 }, 1, false, 0);
-      const floor10 = DungeonGenerator.createEnemy('e10', { x: 0, y: 0 }, 10, false, 0);
+    it('minionアーキタイプは isBoss=false', () => {
+      const arch = ENEMY_ARCHETYPES.find((a) => a.category === 'minion')!;
+      const enemy = DungeonGenerator.createEnemyFromArchetype('test', { x: 0, y: 0 }, arch, 1);
+      expect(enemy.isBoss).toBe(false);
+    });
+
+    it('フロア番号が高いほどHPが増加する', () => {
+      const arch = ENEMY_ARCHETYPES.find((a) => a.category === 'minion')!;
+      const floor1 = DungeonGenerator.createEnemyFromArchetype('e1', { x: 0, y: 0 }, arch, 1);
+      const floor10 = DungeonGenerator.createEnemyFromArchetype('e10', { x: 0, y: 0 }, arch, 10);
       expect(floor10.maxHp).toBeGreaterThan(floor1.maxHp);
     });
 
-    it('Floor1 の雑魚HP はプレイヤー初期ATK(2)で3撃必要な値', () => {
-      const enemy = DungeonGenerator.createEnemy('e', { x: 0, y: 0 }, 1, false, 0);
-      const BASE_ATK = 2;
-      // 2ダメージを何回与えれば倒せるか（ceil(hp/atk) >= 3）
-      expect(Math.ceil(enemy.maxHp / BASE_ATK)).toBeGreaterThanOrEqual(3);
+    it('overlordのHPは同フロアのminionより高い', () => {
+      const overlordArch = ENEMY_ARCHETYPES.find((a) => a.category === 'overlord')!;
+      const minionArch = ENEMY_ARCHETYPES.find((a) => a.category === 'minion')!;
+      const overlord = DungeonGenerator.createEnemyFromArchetype('o', { x: 0, y: 0 }, overlordArch, 10);
+      const minion = DungeonGenerator.createEnemyFromArchetype('m', { x: 0, y: 0 }, minionArch, 10);
+      expect(overlord.maxHp).toBeGreaterThan(minion.maxHp);
     });
 
-    it('敵のHPが0より大きい', () => {
-      const enemy = DungeonGenerator.createEnemy('test', { x: 1, y: 1 }, 1, false, 0);
+    it('HPが0より大きい', () => {
+      const arch = ENEMY_ARCHETYPES.find((a) => a.category === 'minion')!;
+      const enemy = DungeonGenerator.createEnemyFromArchetype('test', { x: 1, y: 1 }, arch, 1);
       expect(enemy.hp).toBeGreaterThan(0);
       expect(enemy.maxHp).toBeGreaterThan(0);
+    });
+
+    it('Floor1 の minion(slime) は ATK=2 で3撃必要な値', () => {
+      // slimeはFloor1で最もHPが低い雑魚だが、3撃以上必要であること
+      const slime = ENEMY_ARCHETYPES.find((a) => a.id === 'slime')!;
+      const enemy = DungeonGenerator.createEnemyFromArchetype('e', { x: 0, y: 0 }, slime, 1);
+      const BASE_ATK = 2;
+      expect(Math.ceil(enemy.maxHp / BASE_ATK)).toBeGreaterThanOrEqual(3);
+    });
+  });
+
+  describe('getAvailableArchetypes()', () => {
+    it('minFloor以上のアーキタイプのみ返す', () => {
+      // minion/minionはfloor1から出現するが、soldierはfloor3以降
+      const floor1 = DungeonGenerator.getAvailableArchetypes('minion', 1);
+      expect(floor1.length).toBeGreaterThan(0);
+      expect(floor1.every((a) => a.minFloor <= 1)).toBe(true);
+    });
+
+    it('eliteはfloor3以降に出現する', () => {
+      const floor2 = DungeonGenerator.getAvailableArchetypes('elite', 2);
+      const floor3 = DungeonGenerator.getAvailableArchetypes('elite', 3);
+      expect(floor2.length).toBe(0);
+      expect(floor3.length).toBeGreaterThan(0);
     });
   });
 });

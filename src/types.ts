@@ -46,6 +46,16 @@ export interface EnemyAttackTelegraph {
   pattern: AttackPattern;
 }
 
+/**
+ * 敵のカテゴリ（強さ階層）
+ * overlord: 大ボス（10の倍数フロア）
+ * boss: 中ボス（5の倍数フロア）
+ * elite: 強敵（フロアに1〜2体）
+ * soldier: 兵士（通常より少し強い雑魚）
+ * minion: 最弱雑魚（スライム・コウモリ等）
+ */
+export type EnemyCategory = 'overlord' | 'boss' | 'elite' | 'soldier' | 'minion';
+
 /** 敵エンティティデータ */
 export interface EnemyData {
   id: string;
@@ -56,7 +66,10 @@ export interface EnemyData {
   def: number;
   state: EnemyState;
   telegraph?: EnemyAttackTelegraph;
+  /** ボス（overlord/boss）かどうか（演出・ステアロック判定に使用） */
   isBoss: boolean;
+  /** 敵カテゴリ */
+  category: EnemyCategory;
   /** 見た目バリアント（0=円, 1=ひし形, 2=星型） */
   variant: 0 | 1 | 2;
   /** 索敵範囲（タイル数） */
