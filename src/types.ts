@@ -61,6 +61,8 @@ export interface EnemyData {
   variant: 0 | 1 | 2;
   /** 索敵範囲（タイル数） */
   detectionRange: number;
+  /** 向いている方向（視界コーンの向き） */
+  facing: Direction;
   /** 攻撃パターン候補一覧（テレグラフ開始時にランダム選択、ターン数も各パターンで保持） */
   attackPatterns: AttackPattern[];
   /** 現在のクールダウン残りターン数 */

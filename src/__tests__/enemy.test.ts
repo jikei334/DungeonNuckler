@@ -16,6 +16,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     isBoss: false,
     variant: 0,
     detectionRange: ENEMY_DETECTION_RANGE,
+    facing: 'down' as const,
     attackPatterns: [{ name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 }],
     currentCooldown: 0,
     expReward: 10,
@@ -39,22 +40,43 @@ function makeFloor(size = 20): TileType[][] {
  */
 describe('Enemy AI', () => {
   describe('canDetectPlayer()', () => {
-    it('索敵範囲内のプレイヤーを検知する', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 } });
-      const player = makePlayer({ x: 5, y: 10 }); // 距離5
-      expect(Enemy.canDetectPlayer(enemy, player)).toBe(true);
+    it('視界コーン内（正面）のプレイヤーを検知する', () => {
+      // 敵が下向き、プレイヤーが真下に距離3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down' });
+      const player = makePlayer({ x: 5, y: 8 });
+      const tiles = makeFloor();
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(true);
     });
 
-    it('索敵範囲外のプレイヤーを検知しない', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, detectionRange: 5 });
-      const player = makePlayer({ x: 5, y: 15 }); // 距離10 > 5
-      expect(Enemy.canDetectPlayer(enemy, player)).toBe(false);
+    it('視界コーン外（真後ろ）のプレイヤーは検知しない', () => {
+      // 敵が下向き、プレイヤーが真上（背後）に距離3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down' });
+      const player = makePlayer({ x: 5, y: 2 });
+      const tiles = makeFloor();
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(false);
     });
 
-    it('同じ位置は検知する', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 } });
-      const player = makePlayer({ x: 5, y: 5 });
-      expect(Enemy.canDetectPlayer(enemy, player)).toBe(true);
+    it('隣接タイルは向きに関係なく常に検知する', () => {
+      // 敵が下向きでも、真上に隣接していれば検知
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down' });
+      const player = makePlayer({ x: 5, y: 4 }); // 距離1（ENEMY_SURROUNDINGS_RADIUS=1以内）
+      const tiles = makeFloor();
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(true);
+    });
+
+    it('索敵範囲外は検知しない', () => {
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down', detectionRange: 3 });
+      const player = makePlayer({ x: 5, y: 15 }); // 距離10 > min(3, 5)
+      const tiles = makeFloor();
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(false);
+    });
+
+    it('壁で視線が遮られていると検知しない', () => {
+      const tiles = makeFloor();
+      tiles[7][5] = 'wall'; // 敵とプレイヤーの間に壁
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down' });
+      const player = makePlayer({ x: 5, y: 9 });
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(false);
     });
   });
 
@@ -82,17 +104,27 @@ describe('Enemy AI', () => {
   });
 
   describe('updateAI() – 状態遷移', () => {
-    it('IDLEでプレイヤーを検知したらCHASEに遷移する', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle' });
-      const player = makePlayer({ x: 5, y: 8 }); // 距離3（検知範囲内）
+    it('IDLEで正面のプレイヤーを検知したらCHASEに遷移する', () => {
+      // 敵が下向き、プレイヤーが正面（真下）距離3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle', facing: 'down' });
+      const player = makePlayer({ x: 5, y: 8 });
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);
       expect(enemy.state).toBe('chase');
     });
 
+    it('IDLEで背後のプレイヤーはCHASEに遷移しない', () => {
+      // 敵が下向き、プレイヤーが背後（真上）距離3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle', facing: 'down' });
+      const player = makePlayer({ x: 5, y: 2 });
+      const tiles = makeFloor();
+      Enemy.updateAI(enemy, player, tiles, [enemy]);
+      expect(enemy.state).toBe('idle');
+    });
+
     it('IDLEでプレイヤーが遠すぎたらIDLEのまま', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle', detectionRange: 3 });
-      const player = makePlayer({ x: 5, y: 15 }); // 距離10 > 3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle', facing: 'down', detectionRange: 3 });
+      const player = makePlayer({ x: 5, y: 15 }); // 距離10 > min(3, 5)
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);
       expect(enemy.state).toBe('idle');

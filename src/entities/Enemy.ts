@@ -1,4 +1,9 @@
-import type { EnemyData, PlayerData, TileType, Vec2, AttackPattern, AttackPatternName } from '../types';
+import type { EnemyData, PlayerData, TileType, Vec2, AttackPattern, AttackPatternName, Direction } from '../types';
+import { FogOfWar } from '../dungeon/FogOfWar';
+import {
+  ENEMY_FOV_RANGE, ENEMY_FOV_ANGLE_DEG, ENEMY_SURROUNDINGS_RADIUS,
+  IDLE_WANDER_CHANCE,
+} from '../constants';
 
 /** 4方向の移動ベクトル一覧 */
 const DIRECTIONS: Vec2[] = [
@@ -7,6 +12,14 @@ const DIRECTIONS: Vec2[] = [
   { x: -1, y:  0 },
   { x:  1, y:  0 },
 ];
+
+/** 移動ベクトルを Direction 文字列に変換する */
+function vecToFacing(dx: number, dy: number): Direction {
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? 'right' : 'left';
+  }
+  return dy >= 0 ? 'down' : 'up';
+}
 
 /** 敵エンティティのAI・状態管理クラス */
 export class Enemy {
@@ -28,9 +41,11 @@ export class Enemy {
   ): boolean {
     switch (enemy.state) {
       case 'idle':
-        if (Enemy.canDetectPlayer(enemy, player)) {
+        if (Enemy.canDetectPlayer(enemy, player, tiles)) {
           enemy.state = 'chase';
           Enemy.runChase(enemy, player, tiles, allEnemies);
+        } else {
+          Enemy.runIdle(enemy, tiles, allEnemies, player);
         }
         break;
 
@@ -62,7 +77,40 @@ export class Enemy {
   }
 
   /**
+   * IDLE状態の行動：IDLE_WANDER_CHANCE の確率でランダムな方向に1マス移動する
+   * 移動時に向きも更新されるため、次ターンの視界方向が変化する
+   *
+   * @param enemy - 敵データ（in-place更新）
+   * @param tiles - タイルデータ
+   * @param allEnemies - 全敵一覧
+   * @param player - プレイヤーデータ（移動可否判定に使用）
+   */
+  private static runIdle(
+    enemy: EnemyData,
+    tiles: TileType[][],
+    allEnemies: EnemyData[],
+    player: PlayerData
+  ): void {
+    if (Math.random() >= IDLE_WANDER_CHANCE) return;
+
+    // ランダムな順序で方向を試す
+    const shuffled = [...DIRECTIONS].sort(() => Math.random() - 0.5);
+    const otherEnemies = allEnemies.filter((e) => e.id !== enemy.id);
+
+    for (const dir of shuffled) {
+      const nx = enemy.pos.x + dir.x;
+      const ny = enemy.pos.y + dir.y;
+      if (!Enemy.canMoveTo(nx, ny, tiles, otherEnemies, player)) continue;
+      enemy.pos.x = nx;
+      enemy.pos.y = ny;
+      enemy.facing = vecToFacing(dir.x, dir.y);
+      break;
+    }
+  }
+
+  /**
    * CHASE状態の行動：隣接したらTELEGRAPH開始、離れていれば1マス接近する
+   * 移動時・隣接時ともにプレイヤー方向へ向きを更新する
    *
    * @param enemy - 敵データ（in-place更新）
    * @param player - プレイヤーデータ
@@ -75,6 +123,13 @@ export class Enemy {
     tiles: TileType[][],
     allEnemies: EnemyData[]
   ): void {
+    // 常にプレイヤー方向へ向く
+    const faceDx = player.pos.x - enemy.pos.x;
+    const faceDy = player.pos.y - enemy.pos.y;
+    if (faceDx !== 0 || faceDy !== 0) {
+      enemy.facing = vecToFacing(faceDx, faceDy);
+    }
+
     if (Enemy.isAdjacentToPlayer(enemy, player)) {
       // 隣接したらテレグラフを開始する（複数パターンからランダム選択）
       const pattern = Enemy.pickPattern(enemy.attackPatterns);
@@ -87,6 +142,11 @@ export class Enemy {
       return;
     }
     const nextPos = Enemy.getNextMove(enemy, player, tiles, allEnemies);
+    const moveDx = nextPos.x - enemy.pos.x;
+    const moveDy = nextPos.y - enemy.pos.y;
+    if (moveDx !== 0 || moveDy !== 0) {
+      enemy.facing = vecToFacing(moveDx, moveDy);
+    }
     enemy.pos.x = nextPos.x;
     enemy.pos.y = nextPos.y;
   }
@@ -196,15 +256,32 @@ export class Enemy {
   }
 
   /**
-   * プレイヤーが索敵範囲内にいるか判定する（ユークリッド距離）
-   * @param enemy - 敵データ
+   * 敵の視界コーンにプレイヤーが入っているか判定する
+   * 隣接タイルは向き関係なく常に発見、それ以外はコーン＋壁遮蔽チェック
+   *
+   * @param enemy - 敵データ（pos, facing, detectionRange）
    * @param player - プレイヤーデータ
-   * @returns 検知範囲内ならtrue
+   * @param tiles - タイルデータ（壁遮蔽チェックに使用）
+   * @returns 検知ならtrue
    */
-  static canDetectPlayer(enemy: EnemyData, player: PlayerData): boolean {
+  static canDetectPlayer(enemy: EnemyData, player: PlayerData, tiles: TileType[][]): boolean {
     const dx = player.pos.x - enemy.pos.x;
     const dy = player.pos.y - enemy.pos.y;
-    return Math.sqrt(dx * dx + dy * dy) <= enemy.detectionRange;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // 隣接タイルは向きに関わらず常に検知
+    if (dist <= ENEMY_SURROUNDINGS_RADIUS) return true;
+
+    // 索敵範囲を超えている場合は検知しない
+    if (dist > Math.min(enemy.detectionRange, ENEMY_FOV_RANGE)) return false;
+
+    // 視界コーン外は検知しない
+    if (!FogOfWar.isInCone(enemy.pos, enemy.facing, player.pos, ENEMY_FOV_RANGE, ENEMY_FOV_ANGLE_DEG)) {
+      return false;
+    }
+
+    // 壁越しは検知しない
+    return FogOfWar.hasLineOfSight(enemy.pos, player.pos, tiles);
   }
 
   /**

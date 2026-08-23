@@ -1,5 +1,5 @@
 import { PRNG } from '../utils/prng';
-import type { TileType, TileVisibility, DungeonFloor, Room, EnemyData, AttackPattern } from '../types';
+import type { TileType, TileVisibility, DungeonFloor, Room, EnemyData, AttackPattern, Direction } from '../types';
 import {
   MAP_WIDTH, MAP_HEIGHT,
   MIN_ROOMS, MAX_ROOMS, MIN_ROOM_SIZE, MAX_ROOM_SIZE,
@@ -275,9 +275,11 @@ export class DungeonGenerator {
     isBoss: boolean,
     bossIndex: number
   ): EnemyData {
-    // IDの文字コード合計から3種類のバリアントを決定（ボスは常に0）
+    // IDの文字コード合計から3種類のバリアントと初期向きを決定（再現性のため乱数ではなくハッシュ使用）
     const idHash = id.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
     const variant = (idHash % 3) as 0 | 1 | 2;
+    const FACING_LIST: Direction[] = ['up', 'down', 'left', 'right'];
+    const initialFacing: Direction = FACING_LIST[idHash % 4];
 
     if (isBoss) {
       const hp = Math.round(BOSS_BASE_HP * Math.pow(BOSS_GROWTH_RATE, Math.max(0, bossIndex - 1)));
@@ -291,6 +293,7 @@ export class DungeonGenerator {
         state: 'idle',
         isBoss: true,
         variant: 0,
+        facing: initialFacing,
         detectionRange: ENEMY_DETECTION_RANGE + 2,
         attackPatterns: [
           { name: 'cross', telegraphTurns: TELEGRAPH_TURNS_BOSS, cooldownTurns: 1 },
@@ -320,6 +323,7 @@ export class DungeonGenerator {
         state: 'idle',
         isBoss: false,
         variant,
+        facing: initialFacing,
         detectionRange: ENEMY_DETECTION_RANGE,
         attackPatterns,
         currentCooldown: 0,

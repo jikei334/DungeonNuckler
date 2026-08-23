@@ -596,6 +596,16 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
+      // 向きインジケーター（IDLE時は半透明、CHASE以降は不透明）
+      const facingAlpha = enemy.state === 'idle' ? 0.4 : 0.85;
+      this.drawFacingIndicator(
+        enemy.pos.x * TILE_SIZE,
+        enemy.pos.y * TILE_SIZE + bob,
+        enemy.facing,
+        0xffffff,
+        facingAlpha,
+      );
+
       this.drawEnemyHpBar(enemy.pos.x * TILE_SIZE, enemy.pos.y * TILE_SIZE, enemy.hp, enemy.maxHp);
     }
 
@@ -621,6 +631,7 @@ export class GameScene extends Phaser.Scene {
     this.drawFacingIndicator(
       this.player.pos.x * TILE_SIZE + offsetX,
       this.player.pos.y * TILE_SIZE + offsetY + this.getBobOffset('player'),
+      this.player.facing,
     );
   }
 
@@ -692,13 +703,21 @@ export class GameScene extends Phaser.Scene {
    * @param px - プレイヤーの描画X（ピクセル）
    * @param py - プレイヤーの描画Y（ピクセル）
    */
-  private drawFacingIndicator(px: number, py: number): void {
+  /**
+   * 向きを示す小三角形インジケーターを描画する
+   * @param px - タイル左上X座標（ピクセル）
+   * @param py - タイル左上Y座標（ピクセル）
+   * @param facing - 向き文字列
+   * @param color - 三角形の色
+   * @param alpha - 不透明度
+   */
+  private drawFacingIndicator(px: number, py: number, facing: string, color = 0xffffff, alpha = 0.85): void {
     const cx = px + TILE_SIZE / 2;
     const cy = py + TILE_SIZE / 2;
     const r = 5;
     let pts: { x: number; y: number }[];
 
-    switch (this.player.facing) {
+    switch (facing) {
       case 'up':
         pts = [{ x: cx, y: cy - r - 4 }, { x: cx - r, y: cy - 2 }, { x: cx + r, y: cy - 2 }];
         break;
@@ -708,12 +727,12 @@ export class GameScene extends Phaser.Scene {
       case 'left':
         pts = [{ x: cx - r - 4, y: cy }, { x: cx - 2, y: cy - r }, { x: cx - 2, y: cy + r }];
         break;
-      case 'right':
+      default: // right
         pts = [{ x: cx + r + 4, y: cy }, { x: cx + 2, y: cy - r }, { x: cx + 2, y: cy + r }];
         break;
     }
 
-    this.entityGfx.fillStyle(0xffffff, 0.85);
+    this.entityGfx.fillStyle(color, alpha);
     this.entityGfx.fillTriangle(
       pts[0].x, pts[0].y,
       pts[1].x, pts[1].y,

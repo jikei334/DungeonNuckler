@@ -69,6 +69,17 @@ export const FOV_ANGLE_DEG = 90;
 /** プレイヤー周囲の常時表示半径（向き・遮蔽に関わらず visible にするマス数） */
 export const FOV_SURROUNDINGS_RADIUS = 1;
 
+// --- 敵視界設定 ---
+
+/** 敵の視界距離（タイル数） */
+export const ENEMY_FOV_RANGE = 5;
+/** 敵の視界角度（度）：プレイヤーと同じ90度コーン */
+export const ENEMY_FOV_ANGLE_DEG = 90;
+/** 敵の周囲常時検知半径：隣接タイルは向き関係なく常に発見 */
+export const ENEMY_SURROUNDINGS_RADIUS = 1;
+/** Idle状態で1ターンに移動するかどうかの確率（0〜1） */
+export const IDLE_WANDER_CHANCE = 0.5;
+
 // --- EXPテーブル（index=レベル、値=そのレベルになるのに必要な累積EXP） ---
 export const EXP_TABLE: number[] = [0, 20, 50, 90, 140, 200, 270, 350, 440, 540, 650];
 
