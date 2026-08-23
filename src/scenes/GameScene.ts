@@ -186,6 +186,9 @@ export class GameScene extends Phaser.Scene {
     FogOfWar.updateVisibility(this.player, this.floor);
     this.redraw();
 
+    // フロア遷移後のフェードイン
+    this.cameras.main.fadeIn(350, 0, 0, 0);
+
     // 最初のターンを開始
     this.startPlayerTurn();
   }
@@ -297,6 +300,10 @@ export class GameScene extends Phaser.Scene {
             // 撃破：敵リストから削除し、EXPを獲得する
             this.floor.enemies = this.floor.enemies.filter((e) => e.id !== bumpedEnemyId);
             this.addLog(`${name}を倒した！`);
+
+            // 敵撃破パーティクル演出
+            this.showEnemyDefeatedEffect(ex, enemy.pos.y * TILE_SIZE + TILE_SIZE / 2, enemy.isBoss);
+
             const levelsGained = CombatSystem.gainExp(this.player, enemy.expReward);
             this.addLog(`EXP +${enemy.expReward}`);
             if (levelsGained > 0) {
@@ -307,6 +314,7 @@ export class GameScene extends Phaser.Scene {
             if (enemy.isBoss && !this.floor.bossDefeated) {
               this.floor.bossDefeated = true;
               this.addLog('封印が解けた！階段が現れた！');
+              this.showBossDefeatedEffect();
             }
           }
         }
@@ -406,16 +414,20 @@ export class GameScene extends Phaser.Scene {
     const nextFloor = this.floor.floorNumber + 1;
     this.addLog(`${nextFloor}階へ降りる…`);
 
-    this.scene.start('GameScene', {
-      floorNumber: nextFloor,
-      seed: this.baseSeed,
-      savedPlayer: {
-        hp:    this.player.hp,
-        atk:   this.player.atk,
-        level: this.player.level,
-        exp:   this.player.exp,
-      },
-    } as GameSceneData);
+    // フロア移動演出：フェードアウト後にシーン遷移
+    this.cameras.main.fadeOut(400, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () => {
+      this.scene.start('GameScene', {
+        floorNumber: nextFloor,
+        seed: this.baseSeed,
+        savedPlayer: {
+          hp:    this.player.hp,
+          atk:   this.player.atk,
+          level: this.player.level,
+          exp:   this.player.exp,
+        },
+      } as GameSceneData);
+    });
   }
 
   /**
@@ -1039,6 +1051,71 @@ export class GameScene extends Phaser.Scene {
   }
 
   // --- 演出エフェクト ---
+
+  /**
+   * 敵撃破パーティクル演出：爆発状に小片が飛び散り消える
+   * @param worldX - 爆発中心ワールドX座標
+   * @param worldY - 爆発中心ワールドY座標
+   * @param isBoss - ボス撃破かどうか（規模が大きくなる）
+   */
+  private showEnemyDefeatedEffect(worldX: number, worldY: number, isBoss: boolean): void {
+    const color = isBoss ? 0xff8800 : 0xff4444;
+    const count = isBoss ? 12 : 8;
+    const distance = isBoss ? 55 : 38;
+    const duration = isBoss ? 650 : 450;
+
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const size = isBoss ? 6 : 4;
+
+      const gfx = this.add.graphics();
+      gfx.fillStyle(color, 1);
+      gfx.fillRect(-size / 2, -size / 2, size, size);
+      gfx.setPosition(worldX, worldY);
+      gfx.setDepth(150);
+
+      const tx = worldX + Math.cos(angle) * distance;
+      const ty = worldY + Math.sin(angle) * distance;
+
+      this.tweens.add({
+        targets: gfx,
+        x: tx,
+        y: ty,
+        alpha: 0,
+        scaleX: 0.3,
+        scaleY: 0.3,
+        duration,
+        ease: 'Power2',
+        onComplete: () => gfx.destroy(),
+      });
+    }
+  }
+
+  /**
+   * ボス撃破特別演出：白フラッシュ＋ "BOSS DEFEATED!" テキスト
+   */
+  private showBossDefeatedEffect(): void {
+    this.cameras.main.flash(500, 255, 200, 100, true);
+    const cx = VIEWPORT_WIDTH / 2;
+    const cy = VIEWPORT_HEIGHT / 2 - 20;
+    const txt = this.add.text(cx, cy, 'BOSS DEFEATED!', {
+      fontSize: '30px',
+      color: '#ff8800',
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setScrollFactor(0).setDepth(300).setOrigin(0.5);
+
+    this.tweens.add({
+      targets: txt,
+      y: cy - 60,
+      alpha: 0,
+      duration: 1800,
+      ease: 'Power2',
+      onComplete: () => txt.destroy(),
+    });
+  }
 
   /**
    * 被弾演出：画面を赤くフラッシュしカメラを揺らす
