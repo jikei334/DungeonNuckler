@@ -22,6 +22,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     atk: 1, def: 0,
     state: 'idle',
     isBoss: false,
+    category: 'minion' as const,
     variant: 0,
     detectionRange: 5,
     facing: 'down' as const,

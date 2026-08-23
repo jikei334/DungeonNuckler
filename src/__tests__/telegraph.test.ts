@@ -10,6 +10,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     hp: 5, maxHp: 5, atk: 1, def: 0,
     state: 'chase',
     isBoss: false,
+    category: 'minion' as const,
     variant: 0,
     detectionRange: 8,
     facing: 'down' as const,
