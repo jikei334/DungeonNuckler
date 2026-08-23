@@ -10,7 +10,7 @@ import type { DungeonFloor, PlayerData, Direction, Vec2 } from '../types';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
-  LOG_LINES, UI_PANEL_HEIGHT, TIMER_BAR_HEIGHT, MAX_LEVEL,
+  LOG_LINES, UI_PANEL_HEIGHT, UI_TOP_HEIGHT, TIMER_BAR_HEIGHT, MAX_LEVEL,
 } from '../constants';
 
 // --- クリック/タッチ BFS移動の間隔(ms) ---
@@ -92,6 +92,8 @@ export class GameScene extends Phaser.Scene {
   private uiGfx!: Phaser.GameObjects.Graphics;
   /** タイマーバー専用レイヤー（毎フレーム更新） */
   private timerGfx!: Phaser.GameObjects.Graphics;
+  /** UIカメラ（フルスクリーン・スクロールなし、マップ非表示） */
+  private uiCamera!: Phaser.Cameras.Scene2D.Camera;
 
   // UIテキスト
   private logTexts: Phaser.GameObjects.Text[] = [];
@@ -168,9 +170,23 @@ export class GameScene extends Phaser.Scene {
     // UIテキスト初期化
     this.setupUI();
 
-    // カメラ設定
+    // カメラ設定：メインカメラはUIパネルを除いたマップ表示エリアのみ
+    const mapViewHeight = VIEWPORT_HEIGHT - UI_TOP_HEIGHT - UI_PANEL_HEIGHT;
+    this.cameras.main.setViewport(0, UI_TOP_HEIGHT, VIEWPORT_WIDTH, mapViewHeight);
     this.cameras.main.setBounds(0, 0, MAP_WIDTH * TILE_SIZE, MAP_HEIGHT * TILE_SIZE);
     this.cameras.main.setZoom(1);
+    // メインカメラはUI要素を描画しない
+    this.cameras.main.ignore([
+      this.uiGfx, this.timerGfx,
+      this.floorText, this.levelText, this.timerLabel,
+      ...this.logTexts,
+    ]);
+
+    // UIカメラ：フルスクリーン・スクロールなし、マップ描画オブジェクトを除外
+    this.uiCamera = this.cameras.add(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, false, 'ui');
+    this.uiCamera.ignore([
+      this.tileGfx, this.fogGfx, this.telegraphGfx, this.pathGfx, this.entityGfx,
+    ]);
 
     // キー登録
     this.setupKeys();
@@ -186,8 +202,9 @@ export class GameScene extends Phaser.Scene {
     FogOfWar.updateVisibility(this.player, this.floor);
     this.redraw();
 
-    // フロア遷移後のフェードイン
+    // フロア遷移後のフェードイン（両カメラ同時）
     this.cameras.main.fadeIn(350, 0, 0, 0);
+    this.uiCamera.fadeIn(350, 0, 0, 0);
 
     // 最初のターンを開始
     this.startPlayerTurn();
@@ -414,8 +431,9 @@ export class GameScene extends Phaser.Scene {
     const nextFloor = this.floor.floorNumber + 1;
     this.addLog(`${nextFloor}階へ降りる…`);
 
-    // フロア移動演出：フェードアウト後にシーン遷移
+    // フロア移動演出：両カメラをフェードアウト後にシーン遷移
     this.cameras.main.fadeOut(400, 0, 0, 0);
+    this.uiCamera.fadeOut(400, 0, 0, 0);
     this.cameras.main.once('camerafadeoutcomplete', () => {
       this.scene.start('GameScene', {
         floorNumber: nextFloor,
@@ -930,9 +948,14 @@ export class GameScene extends Phaser.Scene {
   private onPointerUp = (pointer: Phaser.Input.Pointer): void => {
     if (!this.isWaitingForInput) return;
 
+    // UI領域のクリックは無視（カメラビューポート外）
+    const cam = this.cameras.main;
+    if (pointer.y < cam.y || pointer.y > cam.y + cam.height) return;
+
     // スクリーン座標をワールド座標に変換してタイル位置を算出する
-    const worldX = pointer.x + this.cameras.main.scrollX;
-    const worldY = pointer.y + this.cameras.main.scrollY;
+    // カメラビューポートのY座標オフセット(UI_TOP_HEIGHT)を補正する
+    const worldX = pointer.x - cam.x + cam.scrollX;
+    const worldY = pointer.y - cam.y + cam.scrollY;
     const tileX = Math.floor(worldX / TILE_SIZE);
     const tileY = Math.floor(worldY / TILE_SIZE);
 
@@ -1073,6 +1096,8 @@ export class GameScene extends Phaser.Scene {
       gfx.fillRect(-size / 2, -size / 2, size, size);
       gfx.setPosition(worldX, worldY);
       gfx.setDepth(150);
+      // ワールド座標オブジェクトはUIカメラに表示しない
+      this.uiCamera.ignore(gfx);
 
       const tx = worldX + Math.cos(angle) * distance;
       const ty = worldY + Math.sin(angle) * distance;
@@ -1096,6 +1121,7 @@ export class GameScene extends Phaser.Scene {
    */
   private showBossDefeatedEffect(): void {
     this.cameras.main.flash(500, 255, 200, 100, true);
+    this.uiCamera.flash(500, 255, 200, 100, true);
     const cx = VIEWPORT_WIDTH / 2;
     const cy = VIEWPORT_HEIGHT / 2 - 20;
     const txt = this.add.text(cx, cy, 'BOSS DEFEATED!', {
@@ -1106,6 +1132,8 @@ export class GameScene extends Phaser.Scene {
       stroke: '#000000',
       strokeThickness: 4,
     }).setScrollFactor(0).setDepth(300).setOrigin(0.5);
+    // スクリーン座標オブジェクトはメインカメラに表示しない
+    this.cameras.main.ignore(txt);
 
     this.tweens.add({
       targets: txt,
@@ -1130,6 +1158,7 @@ export class GameScene extends Phaser.Scene {
    */
   private showLevelUpEffect(): void {
     this.cameras.main.flash(300, 255, 200, 0, true);
+    this.uiCamera.flash(300, 255, 200, 0, true);
     const cx = VIEWPORT_WIDTH / 2;
     const cy = VIEWPORT_HEIGHT / 2;
     const txt = this.add.text(cx, cy, 'LEVEL UP!', {
@@ -1138,6 +1167,8 @@ export class GameScene extends Phaser.Scene {
       fontFamily: 'monospace',
       fontStyle: 'bold',
     }).setScrollFactor(0).setDepth(300).setOrigin(0.5);
+    // スクリーン座標オブジェクトはメインカメラに表示しない
+    this.cameras.main.ignore(txt);
 
     this.tweens.add({
       targets: txt,
@@ -1163,6 +1194,8 @@ export class GameScene extends Phaser.Scene {
       fontFamily: 'monospace',
       fontStyle: 'bold',
     }).setOrigin(0.5, 1).setDepth(200);
+    // ワールド座標テキストはUIカメラに表示しない
+    this.uiCamera.ignore(txt);
 
     this.tweens.add({
       targets: txt,

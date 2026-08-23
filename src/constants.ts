@@ -105,5 +105,8 @@ export const LOG_LINES = 5;
 /** タイマーバーの高さ（ピクセル） */
 export const TIMER_BAR_HEIGHT = 12;
 
-/** UIパネルの高さ（ピクセル） */
+/** 上部UIパネルの高さ（フロア番号・レベル・EXPバー・タイマーバーを含む領域） */
+export const UI_TOP_HEIGHT = 72;
+
+/** 下部UIパネルの高さ（戦闘ログ、ピクセル） */
 export const UI_PANEL_HEIGHT = 80;
