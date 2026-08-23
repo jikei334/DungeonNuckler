@@ -1,4 +1,4 @@
-import type { EnemyData, PlayerData, TileType, Vec2 } from '../types';
+import type { EnemyData, PlayerData, TileType, Vec2, AttackPattern, AttackPatternName } from '../types';
 
 /** 4方向の移動ベクトル一覧 */
 const DIRECTIONS: Vec2[] = [
@@ -41,12 +41,14 @@ export class Enemy {
       case 'telegraph':
         return Enemy.runTelegraph(enemy, player);
 
-      case 'execute':
+      case 'execute': {
         // 攻撃発動：呼び出し元（GameScene）がダメージを処理する
+        const cooldownTurns = enemy.telegraph?.pattern.cooldownTurns ?? 0;
         enemy.state = 'cooldown';
-        enemy.currentCooldown = enemy.cooldownTurns;
+        enemy.currentCooldown = cooldownTurns;
         enemy.telegraph = undefined;
         return true;
+      }
 
       case 'cooldown':
         if (enemy.currentCooldown > 0) {
@@ -74,18 +76,29 @@ export class Enemy {
     allEnemies: EnemyData[]
   ): void {
     if (Enemy.isAdjacentToPlayer(enemy, player)) {
-      // 隣接したらテレグラフを開始する
+      // 隣接したらテレグラフを開始する（複数パターンからランダム選択）
+      const pattern = Enemy.pickPattern(enemy.attackPatterns);
       enemy.state = 'telegraph';
       enemy.telegraph = {
-        targetTiles: Enemy.calculateTelegraphTiles(enemy, player),
-        turnsUntilExecute: enemy.telegraphTurns,
-        pattern: enemy.attackPattern,
+        targetTiles: Enemy.calculateTelegraphTiles(enemy, player, pattern.name),
+        turnsUntilExecute: pattern.telegraphTurns,
+        pattern,
       };
       return;
     }
     const nextPos = Enemy.getNextMove(enemy, player, tiles, allEnemies);
     enemy.pos.x = nextPos.x;
     enemy.pos.y = nextPos.y;
+  }
+
+  /**
+   * 攻撃パターン候補からランダムに1つ選ぶ
+   * @param patterns - 候補一覧（空の場合は 'single' にフォールバック）
+   * @returns 選択された攻撃パターン
+   */
+  static pickPattern(patterns: AttackPattern[]): AttackPattern {
+    if (patterns.length === 0) return { name: 'single', telegraphTurns: 1, cooldownTurns: 0 };
+    return patterns[Math.floor(Math.random() * patterns.length)];
   }
 
   /**
@@ -98,11 +111,12 @@ export class Enemy {
    */
   private static runTelegraph(enemy: EnemyData, player: PlayerData): boolean {
     if (!enemy.telegraph) {
-      // テレグラフデータが欠損している場合は再生成
+      // テレグラフデータが欠損している場合は再生成（パターンも再選択）
+      const pattern = Enemy.pickPattern(enemy.attackPatterns);
       enemy.telegraph = {
-        targetTiles: Enemy.calculateTelegraphTiles(enemy, player),
-        turnsUntilExecute: enemy.telegraphTurns,
-        pattern: enemy.attackPattern,
+        targetTiles: Enemy.calculateTelegraphTiles(enemy, player, pattern.name),
+        turnsUntilExecute: pattern.telegraphTurns,
+        pattern,
       };
     }
 
@@ -218,17 +232,18 @@ export class Enemy {
   }
 
   /**
-   * テレグラフの対象タイルを計算する（Phase 5で使用）
-   * attackPattern に応じた攻撃範囲を返す
+   * テレグラフの対象タイルを計算する
+   * 指定された attackPattern に応じた攻撃範囲を返す
    *
-   * @param enemy - 敵データ（pos, attackPattern）
+   * @param enemy - 敵データ（pos）
    * @param player - プレイヤーデータ（ターゲット方向の計算に使用）
+   * @param pattern - 今回使用する攻撃パターン
    * @returns 攻撃対象タイル一覧
    */
-  static calculateTelegraphTiles(enemy: EnemyData, player: PlayerData): Vec2[] {
+  static calculateTelegraphTiles(enemy: EnemyData, player: PlayerData, pattern: AttackPatternName): Vec2[] {
     const { pos } = enemy;
 
-    switch (enemy.attackPattern) {
+    switch (pattern) {
       case 'single':
         // プレイヤーがいるマスを単体攻撃
         return [{ ...player.pos }];

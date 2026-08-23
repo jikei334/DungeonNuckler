@@ -12,9 +12,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     isBoss: false,
     variant: 0,
     detectionRange: 8,
-    telegraphTurns: 2,
-    attackPattern: 'single',
-    cooldownTurns: 1,
+    attackPatterns: [{ name: 'single', telegraphTurns: 2, cooldownTurns: 0 }],
     currentCooldown: 0,
     expReward: 10,
     ...overrides,
@@ -47,7 +45,8 @@ describe('Telegraph System', () => {
     });
 
     it('TELEGRAPH開始時にテレグラフデータが設定される', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 6 }, state: 'chase', telegraphTurns: 2 });
+      const enemy = makeEnemy({ pos: { x: 5, y: 6 }, state: 'chase',
+        attackPatterns: [{ name: 'single', telegraphTurns: 2, cooldownTurns: 0 }] });
       const player = makePlayer({ x: 5, y: 5 });
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);
@@ -57,7 +56,8 @@ describe('Telegraph System', () => {
     });
 
     it('テレグラフの対象タイルが記録される', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 6 }, state: 'chase', attackPattern: 'single' });
+      const enemy = makeEnemy({ pos: { x: 5, y: 6 }, state: 'chase',
+        attackPatterns: [{ name: 'single', telegraphTurns: 2, cooldownTurns: 0 }] });
       const player = makePlayer({ x: 5, y: 5 });
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);
@@ -67,14 +67,14 @@ describe('Telegraph System', () => {
 
   describe('TELEGRAPH カウントダウン', () => {
     it('TELEGRAPHターンごとにturnsUntilExecuteが減少する', () => {
-      const enemy = makeEnemy({ state: 'telegraph', telegraphTurns: 3 });
+      const enemy = makeEnemy({ state: 'telegraph' });
       const player = makePlayer();
       const tiles = makeFloor();
       // TELEGRAPHデータをセットしておく
       enemy.telegraph = {
         targetTiles: [{ x: 5, y: 5 }],
         turnsUntilExecute: 3,
-        pattern: 'single',
+        pattern: { name: 'single', telegraphTurns: 3, cooldownTurns: 0 },
       };
       Enemy.updateAI(enemy, player, tiles, [enemy]);
       expect(enemy.telegraph!.turnsUntilExecute).toBe(2);
@@ -89,14 +89,15 @@ describe('Telegraph System', () => {
       enemy.telegraph = {
         targetTiles: [{ x: 5, y: 5 }],
         turnsUntilExecute: 1,
-        pattern: 'single',
+        pattern: { name: 'single', telegraphTurns: 1, cooldownTurns: 0 },
       };
       Enemy.updateAI(enemy, player, tiles, [enemy]);
       expect(enemy.state).toBe('execute');
     });
 
-    it('telegraphTurns=1 の敵は2ターン目に即EXECUTE', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 6 }, state: 'chase', telegraphTurns: 1 });
+    it('telegraphTurns=1 のパターンを持つ敵は2ターン目に即EXECUTE', () => {
+      const enemy = makeEnemy({ pos: { x: 5, y: 6 }, state: 'chase',
+        attackPatterns: [{ name: 'single', telegraphTurns: 1, cooldownTurns: 0 }] });
       const player = makePlayer({ x: 5, y: 5 });
       const tiles = makeFloor();
       // 1回目: CHASE→TELEGRAPH（turnsUntilExecute=1）
@@ -109,8 +110,13 @@ describe('Telegraph System', () => {
   });
 
   describe('EXECUTE → COOLDOWN', () => {
-    it('EXECUTEはCOOLDOWNに遷移してtrueを返す', () => {
-      const enemy = makeEnemy({ state: 'execute', cooldownTurns: 2 });
+    it('EXECUTEはCOOLDOWNに遷移してtrueを返す（クールダウンはパターンから取得）', () => {
+      const enemy = makeEnemy({ state: 'execute' });
+      enemy.telegraph = {
+        targetTiles: [{ x: 5, y: 5 }],
+        turnsUntilExecute: 0,
+        pattern: { name: 'single', telegraphTurns: 2, cooldownTurns: 2 },
+      };
       const player = makePlayer();
       const tiles = makeFloor();
       const result = Enemy.updateAI(enemy, player, tiles, [enemy]);
@@ -121,7 +127,7 @@ describe('Telegraph System', () => {
     });
 
     it('COOLDOWNが明けたらCHASEに戻る', () => {
-      const enemy = makeEnemy({ state: 'cooldown', cooldownTurns: 2, currentCooldown: 1 });
+      const enemy = makeEnemy({ state: 'cooldown', currentCooldown: 1 });
       const player = makePlayer();
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]); // currentCooldown: 0
@@ -133,7 +139,10 @@ describe('Telegraph System', () => {
 
   describe('ボスの TELEGRAPH', () => {
     it('ボスのtelephraphTurnsが通常より多い', () => {
-      const boss = makeEnemy({ isBoss: true, telegraphTurns: 3, pos: { x: 5, y: 6 }, state: 'chase' });
+      const boss = makeEnemy({
+        isBoss: true, pos: { x: 5, y: 6 }, state: 'chase',
+        attackPatterns: [{ name: 'cross', telegraphTurns: 3, cooldownTurns: 1 }],
+      });
       const player = makePlayer({ x: 5, y: 5 });
       const tiles = makeFloor();
       Enemy.updateAI(boss, player, tiles, [boss]);
@@ -143,7 +152,8 @@ describe('Telegraph System', () => {
 
     it('crossパターンのボスは5タイルをマーキングする', () => {
       const boss = makeEnemy({
-        isBoss: true, telegraphTurns: 3, attackPattern: 'cross',
+        isBoss: true,
+        attackPatterns: [{ name: 'cross', telegraphTurns: 3, cooldownTurns: 1 }],
         pos: { x: 5, y: 6 }, state: 'chase',
       });
       const player = makePlayer({ x: 5, y: 5 });
@@ -159,7 +169,7 @@ describe('Telegraph System', () => {
       enemy.telegraph = {
         targetTiles: [{ x: 3, y: 4 }, { x: 3, y: 5 }],
         turnsUntilExecute: 1,
-        pattern: 'line',
+        pattern: { name: 'line', telegraphTurns: 2, cooldownTurns: 0 },
       };
       expect(Enemy.isTelegraphTarget(enemy, { x: 3, y: 4 })).toBe(true);
       expect(Enemy.isTelegraphTarget(enemy, { x: 3, y: 6 })).toBe(false);
