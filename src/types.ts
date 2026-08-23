@@ -7,8 +7,17 @@ export type EnemyState = 'idle' | 'chase' | 'telegraph' | 'execute' | 'cooldown'
 /** タイルの視界状態 */
 export type TileVisibility = 'unseen' | 'explored' | 'visible';
 
-/** 攻撃パターン */
-export type AttackPattern = 'single' | 'line' | 'cross' | 'area';
+/** 攻撃範囲の種類 */
+export type AttackPatternName = 'single' | 'line' | 'cross' | 'area';
+
+/** 攻撃パターン（攻撃範囲・テレグラフターン・クールダウンターンをひとまとめにしたもの） */
+export interface AttackPattern {
+  name: AttackPatternName;
+  /** テレグラフ（予告）ターン数 */
+  telegraphTurns: number;
+  /** 攻撃後のクールダウンターン数 */
+  cooldownTurns: number;
+}
 
 /** プレイヤーの向き */
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -33,7 +42,7 @@ export interface EnemyAttackTelegraph {
   targetTiles: Vec2[];
   /** 攻撃発動までの残りターン数（0で発動） */
   turnsUntilExecute: number;
-  /** 攻撃パターン */
+  /** 選択された攻撃パターン（クールダウン計算にも使用） */
   pattern: AttackPattern;
 }
 
@@ -52,13 +61,9 @@ export interface EnemyData {
   variant: 0 | 1 | 2;
   /** 索敵範囲（タイル数） */
   detectionRange: number;
-  /** テレグラフ開始ターン数 */
-  telegraphTurns: number;
-  /** 攻撃パターン候補一覧（テレグラフ開始時にランダム選択） */
+  /** 攻撃パターン候補一覧（テレグラフ開始時にランダム選択、ターン数も各パターンで保持） */
   attackPatterns: AttackPattern[];
-  /** クールダウン期間（ターン数） */
-  cooldownTurns: number;
-  /** 現在のクールダウン残り */
+  /** 現在のクールダウン残りターン数 */
   currentCooldown: number;
   /** 撃破時のEXP */
   expReward: number;

@@ -1,4 +1,4 @@
-import type { EnemyData, PlayerData, TileType, Vec2, AttackPattern } from '../types';
+import type { EnemyData, PlayerData, TileType, Vec2, AttackPattern, AttackPatternName } from '../types';
 
 /** 4方向の移動ベクトル一覧 */
 const DIRECTIONS: Vec2[] = [
@@ -41,12 +41,14 @@ export class Enemy {
       case 'telegraph':
         return Enemy.runTelegraph(enemy, player);
 
-      case 'execute':
+      case 'execute': {
         // 攻撃発動：呼び出し元（GameScene）がダメージを処理する
+        const cooldownTurns = enemy.telegraph?.pattern.cooldownTurns ?? 0;
         enemy.state = 'cooldown';
-        enemy.currentCooldown = enemy.cooldownTurns;
+        enemy.currentCooldown = cooldownTurns;
         enemy.telegraph = undefined;
         return true;
+      }
 
       case 'cooldown':
         if (enemy.currentCooldown > 0) {
@@ -78,8 +80,8 @@ export class Enemy {
       const pattern = Enemy.pickPattern(enemy.attackPatterns);
       enemy.state = 'telegraph';
       enemy.telegraph = {
-        targetTiles: Enemy.calculateTelegraphTiles(enemy, player, pattern),
-        turnsUntilExecute: enemy.telegraphTurns,
+        targetTiles: Enemy.calculateTelegraphTiles(enemy, player, pattern.name),
+        turnsUntilExecute: pattern.telegraphTurns,
         pattern,
       };
       return;
@@ -95,7 +97,7 @@ export class Enemy {
    * @returns 選択された攻撃パターン
    */
   static pickPattern(patterns: AttackPattern[]): AttackPattern {
-    if (patterns.length === 0) return 'single';
+    if (patterns.length === 0) return { name: 'single', telegraphTurns: 1, cooldownTurns: 0 };
     return patterns[Math.floor(Math.random() * patterns.length)];
   }
 
@@ -112,8 +114,8 @@ export class Enemy {
       // テレグラフデータが欠損している場合は再生成（パターンも再選択）
       const pattern = Enemy.pickPattern(enemy.attackPatterns);
       enemy.telegraph = {
-        targetTiles: Enemy.calculateTelegraphTiles(enemy, player, pattern),
-        turnsUntilExecute: enemy.telegraphTurns,
+        targetTiles: Enemy.calculateTelegraphTiles(enemy, player, pattern.name),
+        turnsUntilExecute: pattern.telegraphTurns,
         pattern,
       };
     }
@@ -238,7 +240,7 @@ export class Enemy {
    * @param pattern - 今回使用する攻撃パターン
    * @returns 攻撃対象タイル一覧
    */
-  static calculateTelegraphTiles(enemy: EnemyData, player: PlayerData, pattern: AttackPattern): Vec2[] {
+  static calculateTelegraphTiles(enemy: EnemyData, player: PlayerData, pattern: AttackPatternName): Vec2[] {
     const { pos } = enemy;
 
     switch (pattern) {

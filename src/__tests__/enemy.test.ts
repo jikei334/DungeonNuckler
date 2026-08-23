@@ -16,9 +16,7 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     isBoss: false,
     variant: 0,
     detectionRange: ENEMY_DETECTION_RANGE,
-    telegraphTurns: TELEGRAPH_TURNS_NORMAL,
-    attackPatterns: ['single'],
-    cooldownTurns: 1,
+    attackPatterns: [{ name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 }],
     currentCooldown: 0,
     expReward: 10,
     ...overrides,
@@ -120,7 +118,7 @@ describe('Enemy AI', () => {
     });
 
     it('COOLDOWNでカウントダウンが0になったらCHASEに戻る', () => {
-      const enemy = makeEnemy({ state: 'cooldown', cooldownTurns: 1, currentCooldown: 1 });
+      const enemy = makeEnemy({ state: 'cooldown', currentCooldown: 1 });
       const player = makePlayer({ x: 5, y: 4 });
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);

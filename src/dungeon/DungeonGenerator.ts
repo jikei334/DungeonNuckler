@@ -292,18 +292,23 @@ export class DungeonGenerator {
         isBoss: true,
         variant: 0,
         detectionRange: ENEMY_DETECTION_RANGE + 2,
-        telegraphTurns: TELEGRAPH_TURNS_BOSS,
-        attackPatterns: ['cross', 'area'],
-        cooldownTurns: 1,
+        attackPatterns: [
+          { name: 'cross', telegraphTurns: TELEGRAPH_TURNS_BOSS, cooldownTurns: 1 },
+          { name: 'area',  telegraphTurns: TELEGRAPH_TURNS_BOSS, cooldownTurns: 1 },
+        ],
         currentCooldown: 0,
         expReward: BOSS_EXP_REWARD,
       };
     } else {
       // 雑魚敵HP: フロアが深いほど増加（Floor10まで約3撃、以降も線形スケール）
       const hp = Math.round(BASE_ENEMY_HP * (1 + floorNumber * 0.1));
-      // フロア4以降は['single', 'line']の複数パターン候補を持つ
-      const attackPatterns: AttackPattern[] = floorNumber >= 4 ? ['single', 'line'] : ['single'];
-      const telegraphTurns = floorNumber >= 4 ? TELEGRAPH_TURNS_STRONG : TELEGRAPH_TURNS_NORMAL;
+      // フロア4以降は line パターンも選択肢に加える（テレグラフ・クールダウンもパターンごとに定義）
+      const attackPatterns: AttackPattern[] = floorNumber >= 4
+        ? [
+            { name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 },
+            { name: 'line',   telegraphTurns: TELEGRAPH_TURNS_STRONG,  cooldownTurns: 0 },
+          ]
+        : [{ name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 }];
 
       return {
         id,
@@ -316,9 +321,7 @@ export class DungeonGenerator {
         isBoss: false,
         variant,
         detectionRange: ENEMY_DETECTION_RANGE,
-        telegraphTurns,
         attackPatterns,
-        cooldownTurns: 0,
         currentCooldown: 0,
         expReward: ENEMY_EXP_REWARD,
       };
