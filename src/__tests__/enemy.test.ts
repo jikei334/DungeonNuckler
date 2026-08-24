@@ -226,6 +226,90 @@ describe('Enemy AI', () => {
     });
   });
 
+  describe('getApplicableAttackPatterns()', () => {
+    it('singleパターン：隣接時は返す', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 6 },
+        attackPatterns: [{ name: 'single', telegraphTurns: 1, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 真上に隣接
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(1);
+    });
+
+    it('singleパターン：離れている場合は返さない', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 9 },
+        attackPatterns: [{ name: 'single', telegraphTurns: 1, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 距離4
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(0);
+    });
+
+    it('lineパターン：プレイヤーが射程内かつ視線が通れば返す', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 8 },
+        attackPatterns: [{ name: 'line', telegraphTurns: 2, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 上方向 距離3（射程内）
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(1);
+    });
+
+    it('lineパターン：プレイヤーが射程外なら返さない（距離4以上）', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 9 },
+        attackPatterns: [{ name: 'line', telegraphTurns: 2, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 上方向 距離4（射程3を超える）
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(0);
+    });
+
+    it('lineパターン：壁で視線が遮られていれば返さない', () => {
+      const tiles = makeFloor();
+      tiles[7][5] = 'wall'; // 敵(5,8)とプレイヤー(5,5)の間に壁
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 8 },
+        attackPatterns: [{ name: 'line', telegraphTurns: 2, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 });
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(0);
+    });
+
+    it('lineパターン：横方向にも射程が届く', () => {
+      const enemy = makeEnemy({
+        pos: { x: 2, y: 5 },
+        attackPatterns: [{ name: 'line', telegraphTurns: 2, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 右方向 距離3
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(1);
+    });
+
+    it('複数パターンのうち適用可能なものだけを返す', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 8 },
+        attackPatterns: [
+          { name: 'single', telegraphTurns: 1, cooldownTurns: 0 }, // 隣接のみ → 不可
+          { name: 'line',   telegraphTurns: 2, cooldownTurns: 0 }, // 距離3 → 可
+        ],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 距離3
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('line');
+    });
+  });
+
   describe('calculateTelegraphTiles()', () => {
     it('single パターンはプレイヤー位置を1マス返す', () => {
       const enemy = makeEnemy({ pos: { x: 5, y: 5 } });
