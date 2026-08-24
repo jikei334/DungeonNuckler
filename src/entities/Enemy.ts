@@ -109,7 +109,8 @@ export class Enemy {
   }
 
   /**
-   * CHASE状態の行動：隣接したらTELEGRAPH開始、離れていれば1マス接近する
+   * CHASE状態の行動：攻撃射程内に入ったらTELEGRAPH開始、それ以外は1マス接近する
+   * 攻撃射程は各パターンで「今すぐ撃ったら当たるか」で判定する
    * 移動時・隣接時ともにプレイヤー方向へ向きを更新する
    *
    * @param enemy - 敵データ（in-place更新）
@@ -130,9 +131,10 @@ export class Enemy {
       enemy.facing = vecToFacing(faceDx, faceDy);
     }
 
-    if (Enemy.isAdjacentToPlayer(enemy, player)) {
-      // 隣接したらテレグラフを開始する（複数パターンからランダム選択）
-      const pattern = Enemy.pickPattern(enemy.attackPatterns);
+    // 今すぐ攻撃したらプレイヤーに当たるパターンを取得
+    const applicablePatterns = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+    if (applicablePatterns.length > 0) {
+      const pattern = Enemy.pickPattern(applicablePatterns);
       enemy.state = 'telegraph';
       enemy.telegraph = {
         targetTiles: Enemy.calculateTelegraphTiles(enemy, player, pattern.name),
@@ -141,6 +143,7 @@ export class Enemy {
       };
       return;
     }
+
     const nextPos = Enemy.getNextMove(enemy, player, tiles, allEnemies);
     const moveDx = nextPos.x - enemy.pos.x;
     const moveDy = nextPos.y - enemy.pos.y;
@@ -149,6 +152,38 @@ export class Enemy {
     }
     enemy.pos.x = nextPos.x;
     enemy.pos.y = nextPos.y;
+  }
+
+  /**
+   * 現在の位置から各攻撃パターンを即座に撃った場合にプレイヤーに当たるパターンを返す
+   * この結果が空でなければ「射程内」と判断し、TELEGRAPHを開始できる
+   *
+   * パターン別の判定ルール:
+   *   line   : 攻撃タイルを計算してプレイヤーが含まれるか + 視線チェック
+   *   single / cross / area : プレイヤーに隣接している場合のみ（近接攻撃）
+   *
+   * @param enemy - 敵データ
+   * @param player - プレイヤーデータ
+   * @param tiles - タイルデータ（視線確認用）
+   * @returns 今すぐ使用可能な攻撃パターン一覧
+   */
+  static getApplicableAttackPatterns(
+    enemy: EnemyData,
+    player: PlayerData,
+    tiles: TileType[][]
+  ): AttackPattern[] {
+    return enemy.attackPatterns.filter((pattern) => {
+      if (pattern.name === 'line') {
+        // lineパターン: 攻撃タイルにプレイヤーが含まれるかつ視線が通っているか確認
+        const attackTiles = Enemy.calculateTelegraphTiles(enemy, player, 'line');
+        const playerInPath = attackTiles.some(
+          (t) => t.x === player.pos.x && t.y === player.pos.y
+        );
+        return playerInPath && FogOfWar.hasLineOfSight(enemy.pos, player.pos, tiles);
+      }
+      // その他（single / cross / area）: 近接攻撃なので隣接必須
+      return Enemy.isAdjacentToPlayer(enemy, player);
+    });
   }
 
   /**
