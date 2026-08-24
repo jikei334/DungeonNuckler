@@ -391,6 +391,11 @@ export class GameScene extends Phaser.Scene {
 
       // 攻撃発動：テレグラフ対象にプレイヤーがいれば固定1ダメージ
       if (didExecute && telegraphTiles.length > 0) {
+        // 攻撃アニメーション（視界内の敵のみ）
+        if (isVisible) {
+          this.showAttackEffect(telegraphTiles, enemy.pos);
+        }
+
         const hit = telegraphTiles.some(
           (t) => t.x === this.player.pos.x && t.y === this.player.pos.y
         );
@@ -556,17 +561,21 @@ export class GameScene extends Phaser.Scene {
   /**
    * 敵の攻撃予告（テレグラフ）を描画する
    * 視界内（visible）タイルのテレグラフのみ表示する
-   * - 通常予告: 黄色半透明オーバーレイ
-   * - 最終予告ターン（turnsUntilExecute === 1）: 赤で点滅（強調）
+   *
+   * 色のルール:
+   *   TELEGRAPH 状態（予告中）    → 黄色（turnsUntilExecute=1 は強く点滅）
+   *   EXECUTE 状態（攻撃発動ターン）→ 赤の高速点滅（即危険）
    */
   private drawTelegraphs(): void {
     this.telegraphGfx.clear();
 
     for (const enemy of this.floor.enemies) {
-      if (!enemy.telegraph || enemy.state === 'cooldown') continue;
+      if (!enemy.telegraph) continue;
+      // COOLDOWN・IDLE・CHASE では表示しない
+      if (enemy.state !== 'telegraph' && enemy.state !== 'execute') continue;
 
       const { targetTiles, turnsUntilExecute } = enemy.telegraph;
-      const isFinal = turnsUntilExecute <= 1;
+      const isExecuting = enemy.state === 'execute';
 
       for (const tile of targetTiles) {
         // 視界内のタイルのみ表示（視界外の予告は見えない）
@@ -576,24 +585,80 @@ export class GameScene extends Phaser.Scene {
         const px = tile.x * TILE_SIZE;
         const py = tile.y * TILE_SIZE;
 
-        if (isFinal) {
-          // 最終ターン：赤で点滅（sin波でアルファを変化させる）
-          const blinkAlpha = ALPHA_TELEGRAPH + (ALPHA_TELEGRAPH_MAX - ALPHA_TELEGRAPH)
-            * (0.5 + 0.5 * Math.sin(this.time.now / 120));
-          this.telegraphGfx.fillStyle(C_TELEGRAPH_DANGER, blinkAlpha);
-        } else {
-          // 通常予告：黄色半透明
-          this.telegraphGfx.fillStyle(C_TELEGRAPH_WARN, ALPHA_TELEGRAPH);
-        }
-
-        this.telegraphGfx.fillRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-
-        // 枠線（最終ターンのみ）
-        if (isFinal) {
-          this.telegraphGfx.lineStyle(2, C_TELEGRAPH_DANGER, 0.9);
+        if (isExecuting) {
+          // 攻撃発動ターン：赤の高速点滅（緊急！）
+          const pulseAlpha = 0.65 + 0.35 * Math.sin(this.time.now / 75);
+          this.telegraphGfx.fillStyle(C_TELEGRAPH_DANGER, pulseAlpha);
+          this.telegraphGfx.fillRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+          this.telegraphGfx.lineStyle(2, C_TELEGRAPH_DANGER, 1.0);
           this.telegraphGfx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+        } else if (turnsUntilExecute <= 1) {
+          // 直前の予告ターン：黄色・中速点滅（注意！）
+          const pulseAlpha = ALPHA_TELEGRAPH_MAX * (0.75 + 0.25 * Math.sin(this.time.now / 180));
+          this.telegraphGfx.fillStyle(C_TELEGRAPH_WARN, pulseAlpha);
+          this.telegraphGfx.fillRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+          this.telegraphGfx.lineStyle(1, C_TELEGRAPH_WARN, 0.75);
+          this.telegraphGfx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+        } else {
+          // 余裕のある予告ターン：薄い黄色（早期警告）
+          this.telegraphGfx.fillStyle(C_TELEGRAPH_WARN, ALPHA_TELEGRAPH);
+          this.telegraphGfx.fillRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
         }
       }
+    }
+  }
+
+  /**
+   * 敵攻撃発動時のアニメーション
+   * 攻撃元（敵位置）から各対象タイルへ飛翔体を飛ばし、タイルをフラッシュさせる
+   * @param tiles - 攻撃対象タイル一覧
+   * @param enemyPos - 攻撃元の敵位置（タイル座標）
+   */
+  private showAttackEffect(tiles: Vec2[], enemyPos: Vec2): void {
+    const enemyWx = enemyPos.x * TILE_SIZE + TILE_SIZE / 2;
+    const enemyWy = enemyPos.y * TILE_SIZE + TILE_SIZE / 2;
+
+    for (const tile of tiles) {
+      const vis = this.floor.visibility[tile.y]?.[tile.x];
+      if (vis !== 'visible') continue;
+
+      const tx = tile.x * TILE_SIZE + TILE_SIZE / 2;
+      const ty = tile.y * TILE_SIZE + TILE_SIZE / 2;
+
+      // 対象タイルの赤フラッシュ（外側に広がって消える）
+      const flashGfx = this.add.graphics();
+      flashGfx.fillStyle(C_TELEGRAPH_DANGER, 0.9);
+      flashGfx.fillRect(tile.x * TILE_SIZE + 1, tile.y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      flashGfx.setDepth(130);
+      this.uiCamera.ignore(flashGfx);
+
+      this.tweens.add({
+        targets: flashGfx,
+        alpha: 0,
+        scaleX: 1.5,
+        scaleY: 1.5,
+        duration: 380,
+        ease: 'Power2',
+        onComplete: () => flashGfx.destroy(),
+      });
+
+      // 飛翔体（敵の位置からターゲットタイルへ移動して消える）
+      const projGfx = this.add.graphics();
+      projGfx.fillStyle(0xff6600, 1.0);
+      projGfx.fillCircle(0, 0, 5);
+      projGfx.setPosition(enemyWx, enemyWy);
+      projGfx.setDepth(135);
+      this.uiCamera.ignore(projGfx);
+
+      this.tweens.add({
+        targets: projGfx,
+        x: tx,
+        y: ty,
+        alpha: 0,
+        duration: 220,
+        ease: 'Power1',
+        onComplete: () => projGfx.destroy(),
+      });
     }
   }
 
