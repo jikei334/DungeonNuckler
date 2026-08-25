@@ -76,6 +76,40 @@ describe('DungeonGenerator', () => {
         expect(floor.tiles[y][MAP_WIDTH - 1]).toBe('wall');
       }
     });
+
+    it('Floor4未満では岩が生成されない', () => {
+      for (const seed of [1, 42, 100, 200, 999]) {
+        const floor = DungeonGenerator.generate(1, seed);
+        const hasRock = floor.tiles.some((row) => row.some((t) => t === 'rock'));
+        expect(hasRock).toBe(false);
+      }
+    });
+
+    it('Floor12以降では岩が生成される', () => {
+      // 複数シードで試してどれかに岩が含まれることを確認
+      const seeds = [1, 42, 100, 200, 555, 999, 1234, 5678];
+      const anyHasRock = seeds.some((seed) => {
+        const floor = DungeonGenerator.generate(12, seed);
+        return floor.tiles.some((row) => row.some((t) => t === 'rock'));
+      });
+      expect(anyHasRock).toBe(true);
+    });
+
+    it('プレイヤー開始地点に岩は配置されない', () => {
+      for (const seed of [1, 42, 100, 200, 999]) {
+        const floor = DungeonGenerator.generate(12, seed);
+        const { x, y } = floor.playerStart;
+        expect(floor.tiles[y][x]).not.toBe('rock');
+      }
+    });
+
+    it('階段タイルに岩は配置されない', () => {
+      for (const seed of [1, 42, 100, 200, 999]) {
+        const floor = DungeonGenerator.generate(12, seed);
+        const { x, y } = floor.stairsPos;
+        expect(floor.tiles[y][x]).toBe('stairs');
+      }
+    });
   });
 
   describe('isBossFloor()', () => {

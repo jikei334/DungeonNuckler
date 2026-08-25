@@ -46,6 +46,10 @@ export class DungeonGenerator {
 
     const enemies = DungeonGenerator.placeEnemies(prng, rooms, floorNumber, playerStart);
 
+    // 岩配置（敵・プレイヤー開始地点・階段を除外）
+    const reserved = [playerStart, stairsPos, ...enemies.map((e) => e.pos)];
+    DungeonGenerator.placeRocks(prng, tiles, rooms, floorNumber, reserved);
+
     return {
       floorNumber,
       width: MAP_WIDTH,
@@ -180,6 +184,49 @@ export class DungeonGenerator {
     for (let y = minY; y <= maxY; y++) {
       if (y >= 0 && y < MAP_HEIGHT && x2 >= 0 && x2 < MAP_WIDTH) {
         tiles[y][x2] = 'floor';
+      }
+    }
+  }
+
+  /**
+   * 部屋内にランダムな岩障害物を配置する
+   * フロアが深くなるほど岩の数が増加する（Floor4未満: 0個/部屋、Floor4〜7: 0〜1個、Floor8〜11: 0〜2個、Floor12〜: 0〜3個）
+   * プレイヤー開始地点・階段・敵位置には配置しない
+   * 最初の部屋（プレイヤー開始部屋）には配置しない
+   *
+   * @param prng - 乱数生成器
+   * @param tiles - タイル配列（in-place更新）
+   * @param rooms - 部屋一覧（rooms[0]がプレイヤー開始部屋）
+   * @param floorNumber - フロア番号
+   * @param reserved - 岩を配置しない座標一覧
+   */
+  private static placeRocks(
+    prng: PRNG,
+    tiles: TileType[][],
+    rooms: Room[],
+    floorNumber: number,
+    reserved: { x: number; y: number }[]
+  ): void {
+    const maxPerRoom = Math.min(3, Math.floor(floorNumber / 4));
+    if (maxPerRoom === 0) return;
+
+    // 最初の部屋はプレイヤー開始部屋のため除外
+    for (let i = 1; i < rooms.length; i++) {
+      const room = rooms[i];
+      const count = prng.nextInt(0, maxPerRoom);
+      let placed = 0;
+      let attempts = 0;
+
+      while (placed < count && attempts < count * 8) {
+        attempts++;
+        const x = prng.nextInt(room.x, room.x + room.width - 1);
+        const y = prng.nextInt(room.y, room.y + room.height - 1);
+
+        if (tiles[y][x] !== 'floor') continue;
+        if (reserved.some((r) => r.x === x && r.y === y)) continue;
+
+        tiles[y][x] = 'rock';
+        placed++;
       }
     }
   }
