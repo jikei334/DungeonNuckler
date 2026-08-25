@@ -60,7 +60,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 1,
     hpScaling: 0.2,
     atkScaling: 0.2,
-    defScaling: 0.1,
+    defScaling: 0.25,
     variant: 0,
     attackPatterns: [
       { name: 'area',  telegraphTurns: TELEGRAPH_TURNS_BOSS, cooldownTurns: 1 },
@@ -78,7 +78,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 2,
     hpScaling: 0.25,
     atkScaling: 0.3,
-    defScaling: 0.1,
+    defScaling: 0.25,
     variant: 0,
     attackPatterns: [
       { name: 'area',  telegraphTurns: TELEGRAPH_TURNS_BOSS, cooldownTurns: 1 },
@@ -97,10 +97,10 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     minFloor: 5,
     baseHp: 12,
     baseAtk: 2,
-    baseDef: 2,
+    baseDef: 0,
     hpScaling: 0.15,
     atkScaling: 0.15,
-    defScaling: 0.1,
+    defScaling: 0.30,
     variant: 2,
     attackPatterns: [
       { name: 'cross', telegraphTurns: TELEGRAPH_TURNS_BOSS, cooldownTurns: 1 },
@@ -117,7 +117,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 0,
     hpScaling: 0.12,
     atkScaling: 0.2,
-    defScaling: 0,
+    defScaling: 0.15,
     variant: 1,
     attackPatterns: [
       { name: 'line',  telegraphTurns: TELEGRAPH_TURNS_BOSS, cooldownTurns: 0 },
@@ -135,7 +135,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 1,
     hpScaling: 0.12,
     atkScaling: 0.25,
-    defScaling: 0.05,
+    defScaling: 0.25,
     variant: 2,
     attackPatterns: [
       { name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 },
@@ -153,10 +153,10 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     minFloor: 3,
     baseHp: 8,
     baseAtk: 2,
-    baseDef: 1,
+    baseDef: 0,
     hpScaling: 0.12,
     atkScaling: 0.1,
-    defScaling: 0.05,
+    defScaling: 0.20,
     variant: 1,
     attackPatterns: [
       { name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 },
@@ -174,7 +174,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 0,
     hpScaling: 0.1,
     atkScaling: 0.12,
-    defScaling: 0,
+    defScaling: 0.10,
     variant: 2,
     attackPatterns: [
       { name: 'line', telegraphTurns: TELEGRAPH_TURNS_STRONG, cooldownTurns: 0 },
@@ -191,7 +191,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 0,
     hpScaling: 0.1,
     atkScaling: 0.12,
-    defScaling: 0,
+    defScaling: 0.18,
     variant: 0,
     attackPatterns: [
       { name: 'cross', telegraphTurns: TELEGRAPH_TURNS_STRONG, cooldownTurns: 1 },
@@ -211,7 +211,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 0,
     hpScaling: 0.1,
     atkScaling: 0.08,
-    defScaling: 0,
+    defScaling: 0.18,
     variant: 2,
     attackPatterns: [
       { name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 },
@@ -228,7 +228,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 0,
     hpScaling: 0.1,
     atkScaling: 0.1,
-    defScaling: 0,
+    defScaling: 0.20,
     variant: 1,
     attackPatterns: [
       { name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 },
@@ -249,7 +249,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 0,
     hpScaling: 0.06,
     atkScaling: 0.05,
-    defScaling: 0,
+    defScaling: 0.15,
     variant: 0,
     attackPatterns: [
       { name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 },
@@ -266,7 +266,7 @@ export const ENEMY_ARCHETYPES: EnemyArchetypeDef[] = [
     baseDef: 0,
     hpScaling: 0.05,
     atkScaling: 0.05,
-    defScaling: 0,
+    defScaling: 0.12,
     variant: 1,
     attackPatterns: [
       { name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 },
