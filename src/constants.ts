@@ -23,11 +23,11 @@ export const ATK_GROWTH_PER_LEVEL = 1;
 // --- 行動制限タイマー ---
 
 /** 最初のフロアの制限時間（ミリ秒） */
-export const BASE_TIME_MS = 6000;
+export const BASE_TIME_MS = 4000;
 /** フロアごとの制限時間減少量（ミリ秒） */
-export const DECAY_MS = 300;
+export const DECAY_MS = 200;
 /** 制限時間の下限（ミリ秒） */
-export const MIN_TIME_MS = 1500;
+export const MIN_TIME_MS = 500;
 
 // --- 敵パラメータ ---
 
