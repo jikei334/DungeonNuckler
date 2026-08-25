@@ -23,13 +23,13 @@ const BFS_MOVE_INTERVAL_MS = 160;
 const C_WALL_VISIBLE    = 0x888888;  // 中明度グレー
 const C_FLOOR_VISIBLE   = 0x666666;  // やや暗いグレー
 const C_STAIRS_VISIBLE  = 0xccaa00;  // 明るい金色
-const C_ROCK_VISIBLE    = 0x996633;  // 褐色（岩）
+const C_ROCK_VISIBLE    = 0x7a7060;  // 暖灰色（岩）
 
 // 過去に見たが現在視界外のタイル（暗く・青みがかった記憶色）
 const C_WALL_EXPLORED   = 0x3a3a4a;  // 暗青灰（壁の輪郭が見える程度）
 const C_FLOOR_EXPLORED  = 0x1e1e2a;  // 極暗・青みがかった暗色
 const C_STAIRS_EXPLORED = 0x664400;  // 暗い金色
-const C_ROCK_EXPLORED   = 0x4d3319;  // 暗褐色
+const C_ROCK_EXPLORED   = 0x35302a;  // 暗暖灰色
 
 // 未探索エリア
 const C_UNSEEN          = 0x000000;  // 完全な黒
