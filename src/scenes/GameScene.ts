@@ -23,11 +23,13 @@ const BFS_MOVE_INTERVAL_MS = 160;
 const C_WALL_VISIBLE    = 0x888888;  // 中明度グレー
 const C_FLOOR_VISIBLE   = 0x666666;  // やや暗いグレー
 const C_STAIRS_VISIBLE  = 0xccaa00;  // 明るい金色
+const C_ROCK_VISIBLE    = 0x996633;  // 褐色（岩）
 
 // 過去に見たが現在視界外のタイル（暗く・青みがかった記憶色）
 const C_WALL_EXPLORED   = 0x3a3a4a;  // 暗青灰（壁の輪郭が見える程度）
 const C_FLOOR_EXPLORED  = 0x1e1e2a;  // 極暗・青みがかった暗色
 const C_STAIRS_EXPLORED = 0x664400;  // 暗い金色
+const C_ROCK_EXPLORED   = 0x4d3319;  // 暗褐色
 
 // 未探索エリア
 const C_UNSEEN          = 0x000000;  // 完全な黒
@@ -541,16 +543,22 @@ export class GameScene extends Phaser.Scene {
         // 視界内と探索済みで明確に異なる色を直接使用（オーバーレイ方式より識別しやすい）
         let color: number;
         if (vis === 'visible') {
-          color = effectiveTile === 'wall' ? C_WALL_VISIBLE : effectiveTile === 'stairs' ? C_STAIRS_VISIBLE : C_FLOOR_VISIBLE;
+          color = effectiveTile === 'wall'   ? C_WALL_VISIBLE
+                : effectiveTile === 'stairs' ? C_STAIRS_VISIBLE
+                : effectiveTile === 'rock'   ? C_ROCK_VISIBLE
+                : C_FLOOR_VISIBLE;
         } else {
-          color = effectiveTile === 'wall' ? C_WALL_EXPLORED : effectiveTile === 'stairs' ? C_STAIRS_EXPLORED : C_FLOOR_EXPLORED;
+          color = effectiveTile === 'wall'   ? C_WALL_EXPLORED
+                : effectiveTile === 'stairs' ? C_STAIRS_EXPLORED
+                : effectiveTile === 'rock'   ? C_ROCK_EXPLORED
+                : C_FLOOR_EXPLORED;
         }
 
         this.tileGfx.fillStyle(color, 1);
         this.tileGfx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
 
-        // グリッド線は visible タイルの床・階段のみ（explored はノイズを減らすため省略）
-        if (vis === 'visible' && tile !== 'wall') {
+        // グリッド線は visible タイルの床・階段のみ（壁・岩は除外）
+        if (vis === 'visible' && tile !== 'wall' && tile !== 'rock') {
           this.tileGfx.lineStyle(1, 0x3a3a3a, 0.4);
           this.tileGfx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
         }
@@ -1026,7 +1034,7 @@ export class GameScene extends Phaser.Scene {
 
     if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return;
     if (tileX === this.player.pos.x && tileY === this.player.pos.y) return;
-    if (this.floor.tiles[tileY][tileX] === 'wall') return;
+    if (this.floor.tiles[tileY][tileX] === 'wall' || this.floor.tiles[tileY][tileX] === 'rock') return;
     if (this.floor.visibility[tileY][tileX] === 'unseen') return;
     // 敵タイルをクリックした場合：プレイヤーが隣接していれば攻撃、離れていれば無視
     const clickedEnemy = this.floor.enemies.find((e) => e.pos.x === tileX && e.pos.y === tileY);

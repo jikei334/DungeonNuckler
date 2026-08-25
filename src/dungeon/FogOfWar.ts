@@ -1,4 +1,5 @@
 import type { PlayerData, DungeonFloor, Vec2, TileType } from '../types';
+import { isBlockingTile } from '../types';
 import { FOV_RANGE, FOV_ANGLE_DEG, FOV_SURROUNDINGS_RADIUS } from '../constants';
 
 /** 方向ベクトルのマッピング */
@@ -148,7 +149,7 @@ export class FogOfWar {
 
       // 中間タイルが壁なら遮蔽（始点・終点は除く）
       if (!(x0 === from.x && y0 === from.y) && !(x0 === x1 && y0 === y1)) {
-        if (tiles[y0][x0] === 'wall') return false;
+        if (isBlockingTile(tiles[y0][x0])) return false;
       }
 
       const e2 = 2 * err;

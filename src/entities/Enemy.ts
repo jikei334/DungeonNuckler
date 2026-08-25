@@ -1,4 +1,5 @@
 import type { EnemyData, PlayerData, TileType, Vec2, AttackPattern, AttackPatternName, Direction } from '../types';
+import { isBlockingTile } from '../types';
 import { FogOfWar } from '../dungeon/FogOfWar';
 import {
   ENEMY_FOV_RANGE, ENEMY_FOV_ANGLE_DEG, ENEMY_SURROUNDINGS_RADIUS,
@@ -248,7 +249,7 @@ export class Enemy {
     player: PlayerData
   ): boolean {
     if (y < 0 || y >= tiles.length || x < 0 || x >= tiles[0].length) return false;
-    if (tiles[y][x] === 'wall') return false;
+    if (isBlockingTile(tiles[y][x])) return false;
     if (otherEnemies.some((e) => e.pos.x === x && e.pos.y === y)) return false;
     // プレイヤーのいるマスには移動しない（バンプは呼び出し元で管理）
     if (player.pos.x === x && player.pos.y === y) return false;

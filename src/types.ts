@@ -1,5 +1,14 @@
 /** タイルの種類 */
-export type TileType = 'wall' | 'floor' | 'stairs';
+export type TileType = 'wall' | 'floor' | 'stairs' | 'rock';
+
+/**
+ * 移動・視線を遮るタイルかどうかを返す
+ * @param tile - 判定対象タイル
+ * @returns wall または rock なら true
+ */
+export function isBlockingTile(tile: TileType): boolean {
+  return tile === 'wall' || tile === 'rock';
+}
 
 /** 敵のAI状態 */
 export type EnemyState = 'idle' | 'chase' | 'telegraph' | 'execute' | 'cooldown';
