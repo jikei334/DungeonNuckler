@@ -125,6 +125,8 @@ export class GameScene extends Phaser.Scene {
   private keyRight!: Phaser.Input.Keyboard.Key;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyEnter!: Phaser.Input.Keyboard.Key;
+  /** Shift+矢印での向き変更用修飾キー */
+  private keyShift!: Phaser.Input.Keyboard.Key;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -190,6 +192,9 @@ export class GameScene extends Phaser.Scene {
 
     // キー登録
     this.setupKeys();
+
+    // 右クリックのコンテキストメニューを無効化（向き変更操作に使用）
+    this.input.mouse?.disableContextMenu();
 
     // タッチ/クリック入力を登録
     this.input.on('pointerdown', this.onPointerDown, this);
@@ -265,6 +270,7 @@ export class GameScene extends Phaser.Scene {
     this.keyRight = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
     this.keySpace = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyEnter = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    this.keyShift = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
   }
 
   /**
@@ -273,6 +279,44 @@ export class GameScene extends Phaser.Scene {
   startPlayerTurn(): void {
     this.isWaitingForInput = true;
     this.timer.start();
+  }
+
+  /**
+   * 向き変更アクションを処理する（移動なし・ターン消費）
+   * 向き変更後に視界を更新し、通常ターンと同様に敵AIを進める
+   * @param dir - 新しい向き
+   */
+  private processFacingChange(dir: Direction): void {
+    if (!this.isWaitingForInput) return;
+    this.isWaitingForInput = false;
+    this.timer.stop();
+    this.turnCount++;
+
+    this.player.facing = dir;
+    FogOfWar.updateVisibility(this.player, this.floor);
+
+    const label: Record<Direction, string> = { up: '上', down: '下', left: '左', right: '右' };
+    this.addLog(`${label[dir]}を向いた。`);
+
+    this.redraw();
+    this.processEnemyTurns();
+    if (!Player.isAlive(this.player)) return;
+    this.startPlayerTurn();
+  }
+
+  /**
+   * プレイヤー位置から指定タイルへの4方向を返す
+   * 同じタイルの場合は null を返す
+   * @param tileX - 目標タイルX座標
+   * @param tileY - 目標タイルY座標
+   * @returns 4方向いずれか、またはnull
+   */
+  private calcDirectionToTile(tileX: number, tileY: number): Direction | null {
+    const dx = tileX - this.player.pos.x;
+    const dy = tileY - this.player.pos.y;
+    if (dx === 0 && dy === 0) return null;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+    return dy > 0 ? 'down' : 'up';
   }
 
   /**
@@ -977,6 +1021,16 @@ export class GameScene extends Phaser.Scene {
     // キー入力（JustDown でチャタリング防止）
     // BFS自動移動中にキーを押すと経路をキャンセルして通常移動に切り替える
     const JD = Phaser.Input.Keyboard.JustDown;
+
+    // Shift+矢印：向き変更（移動なし・ターン消費）
+    if (this.keyShift.isDown) {
+      if (JD(this.keyW) || JD(this.keyUp))    { this.clearBfsPath(); this.processFacingChange('up');    return; }
+      if (JD(this.keyS) || JD(this.keyDown))  { this.clearBfsPath(); this.processFacingChange('down');  return; }
+      if (JD(this.keyA) || JD(this.keyLeft))  { this.clearBfsPath(); this.processFacingChange('left');  return; }
+      if (JD(this.keyD) || JD(this.keyRight)) { this.clearBfsPath(); this.processFacingChange('right'); return; }
+    }
+
+    // 通常移動
     if (JD(this.keyW) || JD(this.keyUp))         { this.clearBfsPath(); this.processPlayerAction('up');    return; }
     if (JD(this.keyS) || JD(this.keyDown))        { this.clearBfsPath(); this.processPlayerAction('down');  return; }
     if (JD(this.keyA) || JD(this.keyLeft))        { this.clearBfsPath(); this.processPlayerAction('left');  return; }
@@ -997,15 +1051,38 @@ export class GameScene extends Phaser.Scene {
   // --- クリック/タッチ BFS経路移動 ---
 
   /**
-   * ポインタ押下イベント：進行中のBFS経路をキャンセルする
+   * ポインタ押下イベント：2本指タッチで向き変更、それ以外はBFS経路をキャンセルする
+   * @param pointer - Phaserポインタオブジェクト
    */
-  private onPointerDown = (): void => {
+  private onPointerDown = (pointer: Phaser.Input.Pointer): void => {
+    // 右クリックは onPointerUp で処理するためここでは何もしない
+    if (pointer.button === 2) return;
+
+    // 2本指タッチ：向き変更（ターン消費）
+    const p1 = this.input.pointer1;
+    const p2 = this.input.pointer2;
+    if (p1.isDown && p2.isDown && this.isWaitingForInput) {
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      const cam = this.cameras.main;
+      const worldX = midX - cam.x + cam.scrollX;
+      const worldY = midY - cam.y + cam.scrollY;
+      const dir = this.calcDirectionToTile(
+        Math.floor(worldX / TILE_SIZE),
+        Math.floor(worldY / TILE_SIZE),
+      );
+      if (dir) {
+        this.processFacingChange(dir);
+        return;
+      }
+    }
+
     this.clearBfsPath();
   };
 
   /**
-   * ポインタ離上イベント：クリックしたタイルへのBFS経路を計算して自動移動を開始する
-   * 壁・未探索タイル・敵のいるタイルは目標にできない
+   * ポインタ離上イベント：右クリックで向き変更、左クリックでBFS経路移動を開始する
+   * 壁・未探索タイル・敵のいるタイルは左クリックの目標にできない
    * 経路が見つからない場合は何もしない
    *
    * @param pointer - Phaserポインタオブジェクト
@@ -1023,6 +1100,13 @@ export class GameScene extends Phaser.Scene {
     const worldY = pointer.y - cam.y + cam.scrollY;
     const tileX = Math.floor(worldX / TILE_SIZE);
     const tileY = Math.floor(worldY / TILE_SIZE);
+
+    // 右クリック：向き変更（ターン消費）
+    if (pointer.button === 2) {
+      const dir = this.calcDirectionToTile(tileX, tileY);
+      if (dir) this.processFacingChange(dir);
+      return;
+    }
 
     if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return;
     if (tileX === this.player.pos.x && tileY === this.player.pos.y) return;
