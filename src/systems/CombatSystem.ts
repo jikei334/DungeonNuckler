@@ -1,5 +1,5 @@
 import type { PlayerData, EnemyData } from '../types';
-import { BASE_ATK, ATK_GROWTH_PER_LEVEL, EXP_TABLE, MAX_LEVEL } from '../constants';
+import { BASE_ATK, ATK_GROWTH_PER_LEVEL, expForNextLevel } from '../constants';
 
 /** 戦闘・EXP・レベルアップを管理するシステムクラス */
 export class CombatSystem {
@@ -25,24 +25,25 @@ export class CombatSystem {
   }
 
   /**
-   * プレイヤーのEXPを加算し、必要EXPを超えていればレベルアップする
-   * レベルアップ時はATKのみ上昇（最大レベルに達している場合は何もしない）
+   * プレイヤーのEXPを加算し、次のレベルに必要なEXPを超えていればレベルアップする
+   * レベルアップ時は超過分を次のレベルへ持ち越す（上限なし）
    *
    * @param player - プレイヤーデータ（exp/level/atk in-place更新）
    * @param exp - 加算するEXP量
    * @returns 上がったレベル数（レベルアップなし: 0）
    */
   static gainExp(player: PlayerData, exp: number): number {
-    if (player.level >= MAX_LEVEL) return 0;
-
     player.exp += exp;
     let levelsGained = 0;
 
-    // EXP_TABLE[player.level] が次のレベルに必要な累積EXP
-    while (player.level < MAX_LEVEL && player.exp >= EXP_TABLE[player.level]) {
+    // 次レベルへ必要なEXPを超えている間レベルアップし続ける（上限なし）
+    let needed = expForNextLevel(player.level);
+    while (player.exp >= needed) {
+      player.exp -= needed;
       player.level++;
       player.atk = CombatSystem.calcAtk(player.level);
       levelsGained++;
+      needed = expForNextLevel(player.level);
     }
 
     return levelsGained;
@@ -60,13 +61,12 @@ export class CombatSystem {
   }
 
   /**
-   * 次のレベルアップに必要なEXPを返す（最大レベルの場合は現在EXPを返す）
+   * 次のレベルアップに必要なEXP量を返す
    *
    * @param player - プレイヤーデータ
-   * @returns 次のレベルに必要な累積EXP
+   * @returns 次レベルまでに必要なEXP量
    */
   static getNextLevelExp(player: PlayerData): number {
-    if (player.level >= MAX_LEVEL) return player.exp;
-    return EXP_TABLE[player.level];
+    return expForNextLevel(player.level);
   }
 }

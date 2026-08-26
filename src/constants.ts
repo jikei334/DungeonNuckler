@@ -68,11 +68,16 @@ export const ENEMY_SURROUNDINGS_RADIUS = 1;
 /** Idle状態で1ターンに移動するかどうかの確率（0〜1） */
 export const IDLE_WANDER_CHANCE = 0.5;
 
-// --- EXPテーブル（index=レベル、値=そのレベルになるのに必要な累積EXP） ---
-export const EXP_TABLE: number[] = [0, 20, 50, 90, 140, 200, 270, 350, 440, 540, 650];
-
-/** 最大レベル */
-export const MAX_LEVEL = EXP_TABLE.length - 1;
+/**
+ * レベルアップに必要なEXPを返す（上限なし）
+ * 式: round(20 * level^1.2)
+ * L1=20, L5≈96, L10≈201, L20≈422, L50≈1065
+ * @param level - 現在のレベル（1以上）
+ * @returns 次のレベルへ必要なEXP量
+ */
+export function expForNextLevel(level: number): number {
+  return Math.round(20 * Math.pow(level, 1.2));
+}
 
 // --- 部屋生成パラメータ ---
 
