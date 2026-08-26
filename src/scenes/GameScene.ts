@@ -35,8 +35,12 @@ const C_ROCK_EXPLORED   = 0x3a3a4a;  // 壁と同色（探索済み岩）
 const C_UNSEEN          = 0x000000;  // 完全な黒
 
 const C_PLAYER            = 0x33dd66;
-const C_ENEMY             = 0xff4444;
-const C_ENEMY_BOSS        = 0xff8800;
+// カテゴリ別敵色（弱 → 強の順で水色→橙→赤→金→紫に遷移）
+const C_ENEMY_MINION      = 0x88ccff;  // 水色：最弱雑魚
+const C_ENEMY_SOLDIER     = 0xff8844;  // 橙：兵士
+const C_ENEMY_ELITE       = 0xff4444;  // 赤：強敵
+const C_ENEMY_BOSS        = 0xffcc00;  // 金：中ボス
+const C_ENEMY_OVERLORD    = 0xcc44ff;  // 紫：大ボス
 const C_HP_RED            = 0xdd2222;
 const C_HP_GREEN          = 0x22dd44;
 const C_TIMER_BG          = 0x222222;
@@ -729,11 +733,22 @@ export class GameScene extends Phaser.Scene {
       const ty = enemy.pos.y * TILE_SIZE + TILE_SIZE / 2;
       const bob = this.getBobOffset(enemy.id);
       const cy = ty + bob;
-      const color = enemy.isBoss ? C_ENEMY_BOSS : C_ENEMY;
+      // カテゴリ別の色を選択する
+      const colorMap: Record<string, number> = {
+        minion:   C_ENEMY_MINION,
+        soldier:  C_ENEMY_SOLDIER,
+        elite:    C_ENEMY_ELITE,
+        boss:     C_ENEMY_BOSS,
+        overlord: C_ENEMY_OVERLORD,
+      };
+      const color = colorMap[enemy.category] ?? C_ENEMY_ELITE;
 
       this.entityGfx.fillStyle(color, 1);
-      if (enemy.isBoss) {
-        // ボス：大きなひし形
+      if (enemy.category === 'overlord') {
+        // 大ボス：大きな星型
+        this.drawStar(tx, cy, 11, 5);
+      } else if (enemy.category === 'boss') {
+        // 中ボス：大きなひし形
         this.drawDiamond(tx, cy, 10, 12);
       } else {
         switch (enemy.variant) {
