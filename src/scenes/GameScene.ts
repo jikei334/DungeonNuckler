@@ -10,7 +10,7 @@ import type { DungeonFloor, PlayerData, Direction, Vec2 } from '../types';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
-  LOG_LINES, UI_PANEL_HEIGHT, UI_TOP_HEIGHT, TIMER_BAR_HEIGHT, MAX_LEVEL,
+  LOG_LINES, UI_PANEL_HEIGHT, UI_TOP_HEIGHT, TIMER_BAR_HEIGHT,
 } from '../constants';
 
 // --- クリック/タッチ BFS移動の間隔(ms) ---
@@ -535,9 +535,7 @@ export class GameScene extends Phaser.Scene {
   private updateUIText(): void {
     this.floorText.setText(`Floor ${this.floor.floorNumber} | Turn ${this.turnCount}`);
     const nextExp = CombatSystem.getNextLevelExp(this.player);
-    const expStr = this.player.level >= MAX_LEVEL
-      ? 'MAX'
-      : `${this.player.exp}/${nextExp}`;
+    const expStr = `${this.player.exp}/${nextExp}`;
     this.levelText.setText(`Lv.${this.player.level}  ATK: ${this.player.atk}  EXP: ${expStr}`);
   }
 
@@ -925,9 +923,7 @@ export class GameScene extends Phaser.Scene {
    * 最大レベル時は満タン表示
    */
   private drawExpBar(): void {
-    const ratio = this.player.level >= MAX_LEVEL
-      ? 1
-      : this.player.exp / CombatSystem.getNextLevelExp(this.player);
+    const ratio = this.player.exp / CombatSystem.getNextLevelExp(this.player);
     const barW = Math.round(TIMER_BAR_WIDTH * Math.min(ratio, 1));
 
     // バー背景

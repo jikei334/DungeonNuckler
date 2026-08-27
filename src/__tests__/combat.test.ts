@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { CombatSystem } from '../systems/CombatSystem';
 import type { PlayerData, EnemyData } from '../types';
-import { BASE_ATK, ATK_GROWTH_PER_LEVEL, EXP_TABLE, MAX_LEVEL } from '../constants';
+import { BASE_ATK, ATK_GROWTH_PER_LEVEL, expForNextLevel } from '../constants';
 
 /** テスト用PlayerDataを生成する */
 function makePlayer(overrides: Partial<PlayerData> = {}): PlayerData {
@@ -112,40 +112,50 @@ describe('CombatSystem', () => {
 
     it('EXPが閾値に達したらレベルアップする', () => {
       const player = makePlayer({ exp: 0, level: 1 });
-      CombatSystem.gainExp(player, EXP_TABLE[1]); // レベル2の閾値（20）
+      // expForNextLevel(1)=20 ちょうど与えるとlevel2になりexp=0になる
+      CombatSystem.gainExp(player, expForNextLevel(1));
       expect(player.level).toBe(2);
+      expect(player.exp).toBe(0);
     });
 
     it('レベルアップ時にATKが上昇する', () => {
       const player = makePlayer({ exp: 0, level: 1, atk: BASE_ATK });
-      CombatSystem.gainExp(player, EXP_TABLE[1]);
+      CombatSystem.gainExp(player, expForNextLevel(1));
       expect(player.atk).toBe(BASE_ATK + ATK_GROWTH_PER_LEVEL);
     });
 
     it('上がったレベル数を返す', () => {
       const player = makePlayer({ exp: 0, level: 1 });
-      const gained = CombatSystem.gainExp(player, EXP_TABLE[1]);
+      const gained = CombatSystem.gainExp(player, expForNextLevel(1));
       expect(gained).toBe(1);
     });
 
     it('閾値未満はレベルアップしない', () => {
       const player = makePlayer({ exp: 0, level: 1 });
-      CombatSystem.gainExp(player, EXP_TABLE[1] - 1);
+      CombatSystem.gainExp(player, expForNextLevel(1) - 1);
       expect(player.level).toBe(1);
     });
 
     it('大量EXP付与で複数レベルアップする', () => {
       const player = makePlayer({ exp: 0, level: 1 });
-      const gained = CombatSystem.gainExp(player, EXP_TABLE[2]); // レベル3の閾値（50）
+      // Lv1→2: 20EXP, Lv2→3: 46EXP → 合計66EXP
+      const gained = CombatSystem.gainExp(player, expForNextLevel(1) + expForNextLevel(2));
       expect(gained).toBe(2);
       expect(player.level).toBe(3);
     });
 
-    it('最大レベルではEXPを加算しない（0を返す）', () => {
-      const player = makePlayer({ level: MAX_LEVEL, exp: 999 });
-      const gained = CombatSystem.gainExp(player, 100);
-      expect(gained).toBe(0);
-      expect(player.exp).toBe(999); // 変化なし
+    it('超過EXPは次レベルへ持ち越される', () => {
+      const player = makePlayer({ exp: 0, level: 1 });
+      const needed = expForNextLevel(1); // 20
+      CombatSystem.gainExp(player, needed + 5); // 5EXP余る
+      expect(player.level).toBe(2);
+      expect(player.exp).toBe(5);
+    });
+
+    it('上限なく高レベルまでレベルアップできる', () => {
+      const player = makePlayer({ exp: 0, level: 20 });
+      CombatSystem.gainExp(player, expForNextLevel(20));
+      expect(player.level).toBe(21);
     });
   });
 
@@ -166,14 +176,30 @@ describe('CombatSystem', () => {
   });
 
   describe('getNextLevelExp()', () => {
-    it('次レベルの必要EXPを返す', () => {
+    it('Lv1の次レベル必要EXPはexpForNextLevel(1)と一致する', () => {
       const player = makePlayer({ level: 1, exp: 0 });
-      expect(CombatSystem.getNextLevelExp(player)).toBe(EXP_TABLE[1]);
+      expect(CombatSystem.getNextLevelExp(player)).toBe(expForNextLevel(1));
     });
 
-    it('最大レベルでは現在EXPを返す', () => {
-      const player = makePlayer({ level: MAX_LEVEL, exp: 999 });
-      expect(CombatSystem.getNextLevelExp(player)).toBe(999);
+    it('高レベルでも次レベルのEXPを正しく返す', () => {
+      const player = makePlayer({ level: 20, exp: 0 });
+      expect(CombatSystem.getNextLevelExp(player)).toBe(expForNextLevel(20));
+    });
+  });
+
+  describe('expForNextLevel()', () => {
+    it('Lv1の必要EXPは20', () => {
+      expect(expForNextLevel(1)).toBe(20);
+    });
+
+    it('レベルが上がるほど必要EXPが増加する', () => {
+      for (let lv = 1; lv < 20; lv++) {
+        expect(expForNextLevel(lv + 1)).toBeGreaterThan(expForNextLevel(lv));
+      }
+    });
+
+    it('Lv10の必要EXPはLv1の約10倍以上になる', () => {
+      expect(expForNextLevel(10)).toBeGreaterThan(expForNextLevel(1) * 5);
     });
   });
 });
