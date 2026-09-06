@@ -288,35 +288,38 @@ export class DungeonGenerator {
 
     const roomsForRegular = midRooms.length > 0 ? midRooms : (rooms.length > 1 ? rooms.slice(1, 2) : rooms);
 
-    // ---- elite配置 ----
-    // Floor10以降はeliteをより多く配置（ボスフロアは控えめ）
-    const eliteArchetypes = ENEMY_ARCHETYPES.filter(
-      (a) => a.category === 'elite' && a.minFloor <= floorNumber
-    );
-    if (eliteArchetypes.length > 0) {
-      const eliteCount = isBoss
-        ? prng.nextInt(0, 1)
-        : floorNumber >= 10
-          ? prng.nextInt(2, 3)
-          : prng.nextInt(1, 2);
-      DungeonGenerator.placeEnemiesOfArchetypes(
-        prng, enemies, roomsForRegular, eliteArchetypes, eliteCount, floorNumber, playerStart, `elite-${floorNumber}`
+    // 大ボスフロア（10の倍数）はoverlordのみ。elite・通常敵は配置しない
+    if (!isOverlord) {
+      // ---- elite配置 ----
+      // Floor10以降はeliteをより多く配置（ボスフロアは控えめ）
+      const eliteArchetypes = ENEMY_ARCHETYPES.filter(
+        (a) => a.category === 'elite' && a.minFloor <= floorNumber
       );
-    }
+      if (eliteArchetypes.length > 0) {
+        const eliteCount = isBoss
+          ? prng.nextInt(0, 1)
+          : floorNumber >= 10
+            ? prng.nextInt(2, 3)
+            : prng.nextInt(1, 2);
+        DungeonGenerator.placeEnemiesOfArchetypes(
+          prng, enemies, roomsForRegular, eliteArchetypes, eliteCount, floorNumber, playerStart, `elite-${floorNumber}`
+        );
+      }
 
-    // ---- 通常敵配置（soldier + minion）----
-    // Floor10以降: 敵部屋数（rooms.length - 2）を目安に配置（各部屋に約1体）
-    // Floor10未満: 線形増加（最大5体）
-    const normalArchetypes = ENEMY_ARCHETYPES.filter(
-      (a) => (a.category === 'soldier' || a.category === 'minion') && a.minFloor <= floorNumber
-    );
-    const normalCount = floorNumber >= 10
-      ? Math.max(4, rooms.length - 2)
-      : Math.min(5, Math.floor(floorNumber / 3) + 2);
-    if (normalArchetypes.length > 0) {
-      DungeonGenerator.placeEnemiesOfArchetypes(
-        prng, enemies, roomsForRegular, normalArchetypes, normalCount, floorNumber, playerStart, `normal-${floorNumber}`
+      // ---- 通常敵配置（soldier + minion）----
+      // Floor10以降: 敵部屋数（rooms.length - 2）を目安に配置（各部屋に約1体）
+      // Floor10未満: 線形増加（最大5体）
+      const normalArchetypes = ENEMY_ARCHETYPES.filter(
+        (a) => (a.category === 'soldier' || a.category === 'minion') && a.minFloor <= floorNumber
       );
+      const normalCount = floorNumber >= 10
+        ? Math.max(4, rooms.length - 2)
+        : Math.min(5, Math.floor(floorNumber / 3) + 2);
+      if (normalArchetypes.length > 0) {
+        DungeonGenerator.placeEnemiesOfArchetypes(
+          prng, enemies, roomsForRegular, normalArchetypes, normalCount, floorNumber, playerStart, `normal-${floorNumber}`
+        );
+      }
     }
 
     return enemies;
