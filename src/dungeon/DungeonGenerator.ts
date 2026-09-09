@@ -16,6 +16,11 @@ export class DungeonGenerator {
    * @returns 生成されたDungeonFloor
    */
   static generate(floorNumber: number, baseSeed: number): DungeonFloor {
+    // 10の倍数フロアは固定大部屋のoverlordアリーナ
+    if (DungeonGenerator.isOverlordFloor(floorNumber)) {
+      return DungeonGenerator.generateOverlordFloor(floorNumber, baseSeed);
+    }
+
     // フロアごとに異なるシードを生成して再現性を確保
     const seed = (baseSeed ^ (floorNumber * 0x9e3779b9)) >>> 0;
     const prng = new PRNG(seed);
@@ -62,6 +67,68 @@ export class DungeonGenerator {
       rooms,
       // ボスフロアではボス撃破まで階段が出現しない
       bossDefeated: !DungeonGenerator.isBossFloor(floorNumber),
+    };
+  }
+
+  /**
+   * 10の倍数フロア用の固定大部屋アリーナを生成する
+   * マップ全体をほぼ覆う1部屋のみで、overlordボスが中央に配置される
+   */
+  private static generateOverlordFloor(floorNumber: number, baseSeed: number): DungeonFloor {
+    const seed = (baseSeed ^ (floorNumber * 0x9e3779b9)) >>> 0;
+    const prng = new PRNG(seed);
+
+    const tiles = DungeonGenerator.initTiles();
+
+    // 外周2タイルを壁として残した大部屋
+    const room: Room = {
+      x: 2,
+      y: 2,
+      width: MAP_WIDTH - 4,
+      height: MAP_HEIGHT - 4,
+    };
+    DungeonGenerator.carveRoom(tiles, room);
+
+    // プレイヤーは左寄り中央
+    const playerStart = { x: 4, y: Math.floor(MAP_HEIGHT / 2) };
+
+    // 階段は右寄り中央
+    const stairsPos = { x: MAP_WIDTH - 5, y: Math.floor(MAP_HEIGHT / 2) };
+    tiles[stairsPos.y][stairsPos.x] = 'stairs';
+
+    const visibility: TileVisibility[][] = Array.from({ length: MAP_HEIGHT }, () =>
+      Array<TileVisibility>(MAP_WIDTH).fill('unseen')
+    );
+
+    // overlordを中央に1体だけ配置
+    const bossPos = { x: Math.floor(MAP_WIDTH / 2), y: Math.floor(MAP_HEIGHT / 2) };
+    const overlordArchetypes = ENEMY_ARCHETYPES.filter(
+      (a) => a.category === 'overlord' && a.minFloor <= floorNumber
+    );
+    const enemies: EnemyData[] = [];
+    if (overlordArchetypes.length > 0) {
+      const archetype = overlordArchetypes[prng.nextInt(0, overlordArchetypes.length - 1)];
+      enemies.push(
+        DungeonGenerator.createEnemyFromArchetype(
+          `enemy-boss-${floorNumber}`,
+          bossPos,
+          archetype,
+          floorNumber
+        )
+      );
+    }
+
+    return {
+      floorNumber,
+      width: MAP_WIDTH,
+      height: MAP_HEIGHT,
+      tiles,
+      visibility,
+      playerStart,
+      stairsPos,
+      enemies,
+      rooms: [room],
+      bossDefeated: false,
     };
   }
 

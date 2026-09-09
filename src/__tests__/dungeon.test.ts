@@ -149,6 +149,71 @@ describe('DungeonGenerator', () => {
     });
   });
 
+  describe('overlordフロア（10の倍数）の固定大部屋生成', () => {
+    it('部屋が1つだけ生成される', () => {
+      const floor = DungeonGenerator.generate(10, 42);
+      expect(floor.rooms.length).toBe(1);
+    });
+
+    it('マップ外周2タイルを壁として残した大部屋が生成される', () => {
+      const floor = DungeonGenerator.generate(10, 42);
+      const room = floor.rooms[0];
+      expect(room.x).toBe(2);
+      expect(room.y).toBe(2);
+      expect(room.width).toBe(MAP_WIDTH - 4);
+      expect(room.height).toBe(MAP_HEIGHT - 4);
+    });
+
+    it('20階でも同じ大部屋構造になる', () => {
+      const floor = DungeonGenerator.generate(20, 42);
+      expect(floor.rooms.length).toBe(1);
+      expect(floor.rooms[0].x).toBe(2);
+    });
+
+    it('playerStart が床タイル上にある', () => {
+      const floor = DungeonGenerator.generate(10, 42);
+      const { x, y } = floor.playerStart;
+      expect(floor.tiles[y][x]).not.toBe('wall');
+    });
+
+    it('stairsPos が stairs タイルになっている', () => {
+      const floor = DungeonGenerator.generate(10, 42);
+      const { x, y } = floor.stairsPos;
+      expect(floor.tiles[y][x]).toBe('stairs');
+    });
+
+    it('overlordボスが1体だけ配置される', () => {
+      const floor = DungeonGenerator.generate(10, 42);
+      const overlords = floor.enemies.filter((e) => e.category === 'overlord');
+      expect(overlords.length).toBe(1);
+    });
+
+    it('overlord以外の敵は配置されない', () => {
+      const floor = DungeonGenerator.generate(10, 42);
+      const others = floor.enemies.filter((e) => e.category !== 'overlord');
+      expect(others.length).toBe(0);
+    });
+
+    it('bossDefeated が false', () => {
+      const floor = DungeonGenerator.generate(10, 42);
+      expect(floor.bossDefeated).toBe(false);
+    });
+
+    it('岩が配置されない', () => {
+      const floor = DungeonGenerator.generate(10, 42);
+      const hasRock = floor.tiles.some((row) => row.some((t) => t === 'rock'));
+      expect(hasRock).toBe(false);
+    });
+
+    it('同じシードで同じフロアを生成する（再現性）', () => {
+      const a = DungeonGenerator.generate(10, 12345);
+      const b = DungeonGenerator.generate(10, 12345);
+      expect(a.tiles).toEqual(b.tiles);
+      expect(a.playerStart).toEqual(b.playerStart);
+      expect(a.stairsPos).toEqual(b.stairsPos);
+    });
+  });
+
   describe('bossDefeated フラグ', () => {
     it('非ボスフロアは生成時から bossDefeated=true', () => {
       const floor = DungeonGenerator.generate(1, 42);
