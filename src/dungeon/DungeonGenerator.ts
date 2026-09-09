@@ -80,28 +80,31 @@ export class DungeonGenerator {
 
     const tiles = DungeonGenerator.initTiles();
 
-    // 外周2タイルを壁として残した大部屋
+    // 通常部屋（平均6×6）の約1.5倍サイズをマップ中央に配置
+    const ARENA_W = 12;
+    const ARENA_H = 10;
     const room: Room = {
-      x: 2,
-      y: 2,
-      width: MAP_WIDTH - 4,
-      height: MAP_HEIGHT - 4,
+      x: Math.floor((MAP_WIDTH - ARENA_W) / 2),
+      y: Math.floor((MAP_HEIGHT - ARENA_H) / 2),
+      width: ARENA_W,
+      height: ARENA_H,
     };
     DungeonGenerator.carveRoom(tiles, room);
 
-    // プレイヤーは左寄り中央
-    const playerStart = { x: 4, y: Math.floor(MAP_HEIGHT / 2) };
-
-    // 階段は右寄り中央
-    const stairsPos = { x: MAP_WIDTH - 5, y: Math.floor(MAP_HEIGHT / 2) };
+    // ボスと階段は部屋の中央より少し上
+    const centerX = Math.floor(room.x + room.width / 2);
+    const bossPos = { x: centerX, y: room.y + 2 };
+    const stairsPos = { ...bossPos };
     tiles[stairsPos.y][stairsPos.x] = 'stairs';
+
+    // プレイヤーは部屋の下方中央
+    const playerStart = { x: centerX, y: room.y + room.height - 2 };
 
     const visibility: TileVisibility[][] = Array.from({ length: MAP_HEIGHT }, () =>
       Array<TileVisibility>(MAP_WIDTH).fill('unseen')
     );
 
-    // overlordを中央に1体だけ配置
-    const bossPos = { x: Math.floor(MAP_WIDTH / 2), y: Math.floor(MAP_HEIGHT / 2) };
+    // overlordをbossPosに1体だけ配置
     const overlordArchetypes = ENEMY_ARCHETYPES.filter(
       (a) => a.category === 'overlord' && a.minFloor <= floorNumber
     );
@@ -116,6 +119,22 @@ export class DungeonGenerator {
           floorNumber
         )
       );
+    }
+
+    // 岩をランダムに数個配置（プレイヤー・ボス・階段位置を除外）
+    // 部屋内部（壁から1タイル内側）に限定し、通行を妨げない密度に抑える
+    const ARENA_ROCK_COUNT = 6;
+    const reserved = [playerStart, bossPos];
+    let rocksPlaced = 0;
+    let attempts = 0;
+    while (rocksPlaced < ARENA_ROCK_COUNT && attempts < ARENA_ROCK_COUNT * 10) {
+      attempts++;
+      const rx = prng.nextInt(room.x + 1, room.x + room.width - 2);
+      const ry = prng.nextInt(room.y + 1, room.y + room.height - 2);
+      if (tiles[ry][rx] !== 'floor') continue;
+      if (reserved.some((r) => r.x === rx && r.y === ry)) continue;
+      tiles[ry][rx] = 'rock';
+      rocksPlaced++;
     }
 
     return {

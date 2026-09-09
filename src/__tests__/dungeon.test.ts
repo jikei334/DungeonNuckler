@@ -155,19 +155,21 @@ describe('DungeonGenerator', () => {
       expect(floor.rooms.length).toBe(1);
     });
 
-    it('マップ外周2タイルを壁として残した大部屋が生成される', () => {
+    it('通常部屋の約1.5倍サイズ（12×10）の大部屋がマップ中央に生成される', () => {
       const floor = DungeonGenerator.generate(10, 42);
       const room = floor.rooms[0];
-      expect(room.x).toBe(2);
-      expect(room.y).toBe(2);
-      expect(room.width).toBe(MAP_WIDTH - 4);
-      expect(room.height).toBe(MAP_HEIGHT - 4);
+      expect(room.width).toBe(12);
+      expect(room.height).toBe(10);
+      // マップ中央に配置されている
+      expect(room.x).toBe(Math.floor((MAP_WIDTH - 12) / 2));
+      expect(room.y).toBe(Math.floor((MAP_HEIGHT - 10) / 2));
     });
 
     it('20階でも同じ大部屋構造になる', () => {
       const floor = DungeonGenerator.generate(20, 42);
       expect(floor.rooms.length).toBe(1);
-      expect(floor.rooms[0].x).toBe(2);
+      expect(floor.rooms[0].width).toBe(12);
+      expect(floor.rooms[0].height).toBe(10);
     });
 
     it('playerStart が床タイル上にある', () => {
@@ -199,10 +201,26 @@ describe('DungeonGenerator', () => {
       expect(floor.bossDefeated).toBe(false);
     });
 
-    it('岩が配置されない', () => {
+    it('部屋内に岩が配置される', () => {
       const floor = DungeonGenerator.generate(10, 42);
       const hasRock = floor.tiles.some((row) => row.some((t) => t === 'rock'));
-      expect(hasRock).toBe(false);
+      expect(hasRock).toBe(true);
+    });
+
+    it('プレイヤー開始地点に岩は配置されない', () => {
+      for (const seed of [1, 42, 100, 200, 999]) {
+        const floor = DungeonGenerator.generate(10, seed);
+        const { x, y } = floor.playerStart;
+        expect(floor.tiles[y][x]).not.toBe('rock');
+      }
+    });
+
+    it('ボス位置（階段位置）に岩は配置されない', () => {
+      for (const seed of [1, 42, 100, 200, 999]) {
+        const floor = DungeonGenerator.generate(10, seed);
+        const { x, y } = floor.stairsPos;
+        expect(floor.tiles[y][x]).toBe('stairs');
+      }
     });
 
     it('同じシードで同じフロアを生成する（再現性）', () => {
