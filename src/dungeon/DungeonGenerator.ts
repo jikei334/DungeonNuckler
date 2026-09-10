@@ -16,6 +16,11 @@ export class DungeonGenerator {
    * @returns 生成されたDungeonFloor
    */
   static generate(floorNumber: number, baseSeed: number): DungeonFloor {
+    // 10の倍数フロアは固定大部屋のoverlordアリーナ
+    if (DungeonGenerator.isOverlordFloor(floorNumber)) {
+      return DungeonGenerator.generateOverlordFloor(floorNumber, baseSeed);
+    }
+
     // フロアごとに異なるシードを生成して再現性を確保
     const seed = (baseSeed ^ (floorNumber * 0x9e3779b9)) >>> 0;
     const prng = new PRNG(seed);
@@ -62,6 +67,87 @@ export class DungeonGenerator {
       rooms,
       // ボスフロアではボス撃破まで階段が出現しない
       bossDefeated: !DungeonGenerator.isBossFloor(floorNumber),
+    };
+  }
+
+  /**
+   * 10の倍数フロア用の固定大部屋アリーナを生成する
+   * マップ全体をほぼ覆う1部屋のみで、overlordボスが中央に配置される
+   */
+  private static generateOverlordFloor(floorNumber: number, baseSeed: number): DungeonFloor {
+    const seed = (baseSeed ^ (floorNumber * 0x9e3779b9)) >>> 0;
+    const prng = new PRNG(seed);
+
+    const tiles = DungeonGenerator.initTiles();
+
+    // 通常部屋（平均6×6）の約1.5倍サイズをマップ中央に配置
+    const ARENA_W = 12;
+    const ARENA_H = 10;
+    const room: Room = {
+      x: Math.floor((MAP_WIDTH - ARENA_W) / 2),
+      y: Math.floor((MAP_HEIGHT - ARENA_H) / 2),
+      width: ARENA_W,
+      height: ARENA_H,
+    };
+    DungeonGenerator.carveRoom(tiles, room);
+
+    // ボスと階段は部屋の中央より少し上
+    const centerX = Math.floor(room.x + room.width / 2);
+    const bossPos = { x: centerX, y: room.y + 2 };
+    const stairsPos = { ...bossPos };
+    tiles[stairsPos.y][stairsPos.x] = 'stairs';
+
+    // プレイヤーは部屋の下方中央
+    const playerStart = { x: centerX, y: room.y + room.height - 2 };
+
+    const visibility: TileVisibility[][] = Array.from({ length: MAP_HEIGHT }, () =>
+      Array<TileVisibility>(MAP_WIDTH).fill('unseen')
+    );
+
+    // overlordをbossPosに1体だけ配置
+    const overlordArchetypes = ENEMY_ARCHETYPES.filter(
+      (a) => a.category === 'overlord' && a.minFloor <= floorNumber
+    );
+    const enemies: EnemyData[] = [];
+    if (overlordArchetypes.length > 0) {
+      const archetype = overlordArchetypes[prng.nextInt(0, overlordArchetypes.length - 1)];
+      enemies.push(
+        DungeonGenerator.createEnemyFromArchetype(
+          `enemy-boss-${floorNumber}`,
+          bossPos,
+          archetype,
+          floorNumber
+        )
+      );
+    }
+
+    // 岩をランダムに数個配置（プレイヤー・ボス・階段位置を除外）
+    // 部屋内部（壁から1タイル内側）に限定し、通行を妨げない密度に抑える
+    const ARENA_ROCK_COUNT = 6;
+    const reserved = [playerStart, bossPos];
+    let rocksPlaced = 0;
+    let attempts = 0;
+    while (rocksPlaced < ARENA_ROCK_COUNT && attempts < ARENA_ROCK_COUNT * 10) {
+      attempts++;
+      const rx = prng.nextInt(room.x + 1, room.x + room.width - 2);
+      const ry = prng.nextInt(room.y + 1, room.y + room.height - 2);
+      if (tiles[ry][rx] !== 'floor') continue;
+      if (reserved.some((r) => r.x === rx && r.y === ry)) continue;
+      tiles[ry][rx] = 'rock';
+      rocksPlaced++;
+    }
+
+    return {
+      floorNumber,
+      width: MAP_WIDTH,
+      height: MAP_HEIGHT,
+      tiles,
+      visibility,
+      playerStart,
+      stairsPos,
+      enemies,
+      rooms: [room],
+      bossDefeated: false,
     };
   }
 
@@ -288,35 +374,38 @@ export class DungeonGenerator {
 
     const roomsForRegular = midRooms.length > 0 ? midRooms : (rooms.length > 1 ? rooms.slice(1, 2) : rooms);
 
-    // ---- elite配置 ----
-    // Floor10以降はeliteをより多く配置（ボスフロアは控えめ）
-    const eliteArchetypes = ENEMY_ARCHETYPES.filter(
-      (a) => a.category === 'elite' && a.minFloor <= floorNumber
-    );
-    if (eliteArchetypes.length > 0) {
-      const eliteCount = isBoss
-        ? prng.nextInt(0, 1)
-        : floorNumber >= 10
-          ? prng.nextInt(2, 3)
-          : prng.nextInt(1, 2);
-      DungeonGenerator.placeEnemiesOfArchetypes(
-        prng, enemies, roomsForRegular, eliteArchetypes, eliteCount, floorNumber, playerStart, `elite-${floorNumber}`
+    // 大ボスフロア（10の倍数）はoverlordのみ。elite・通常敵は配置しない
+    if (!isOverlord) {
+      // ---- elite配置 ----
+      // Floor10以降はeliteをより多く配置（ボスフロアは控えめ）
+      const eliteArchetypes = ENEMY_ARCHETYPES.filter(
+        (a) => a.category === 'elite' && a.minFloor <= floorNumber
       );
-    }
+      if (eliteArchetypes.length > 0) {
+        const eliteCount = isBoss
+          ? prng.nextInt(0, 1)
+          : floorNumber >= 10
+            ? prng.nextInt(2, 3)
+            : prng.nextInt(1, 2);
+        DungeonGenerator.placeEnemiesOfArchetypes(
+          prng, enemies, roomsForRegular, eliteArchetypes, eliteCount, floorNumber, playerStart, `elite-${floorNumber}`
+        );
+      }
 
-    // ---- 通常敵配置（soldier + minion）----
-    // Floor10以降: 敵部屋数（rooms.length - 2）を目安に配置（各部屋に約1体）
-    // Floor10未満: 線形増加（最大5体）
-    const normalArchetypes = ENEMY_ARCHETYPES.filter(
-      (a) => (a.category === 'soldier' || a.category === 'minion') && a.minFloor <= floorNumber
-    );
-    const normalCount = floorNumber >= 10
-      ? Math.max(4, rooms.length - 2)
-      : Math.min(5, Math.floor(floorNumber / 3) + 2);
-    if (normalArchetypes.length > 0) {
-      DungeonGenerator.placeEnemiesOfArchetypes(
-        prng, enemies, roomsForRegular, normalArchetypes, normalCount, floorNumber, playerStart, `normal-${floorNumber}`
+      // ---- 通常敵配置（soldier + minion）----
+      // Floor10以降: 敵部屋数（rooms.length - 2）を目安に配置（各部屋に約1体）
+      // Floor10未満: 線形増加（最大5体）
+      const normalArchetypes = ENEMY_ARCHETYPES.filter(
+        (a) => (a.category === 'soldier' || a.category === 'minion') && a.minFloor <= floorNumber
       );
+      const normalCount = floorNumber >= 10
+        ? Math.max(4, rooms.length - 2)
+        : Math.min(5, Math.floor(floorNumber / 3) + 2);
+      if (normalArchetypes.length > 0) {
+        DungeonGenerator.placeEnemiesOfArchetypes(
+          prng, enemies, roomsForRegular, normalArchetypes, normalCount, floorNumber, playerStart, `normal-${floorNumber}`
+        );
+      }
     }
 
     return enemies;
