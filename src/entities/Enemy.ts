@@ -1,4 +1,10 @@
-import type { EnemyData, PlayerData, TileType, Vec2 } from '../types';
+import type { EnemyData, PlayerData, TileType, Vec2, AttackPattern, AttackPatternName, Direction } from '../types';
+import { isBlockingTile } from '../types';
+import { FogOfWar } from '../dungeon/FogOfWar';
+import {
+  ENEMY_FOV_RANGE, ENEMY_FOV_ANGLE_DEG, ENEMY_SURROUNDINGS_RADIUS,
+  IDLE_WANDER_CHANCE,
+} from '../constants';
 
 /** 4方向の移動ベクトル一覧 */
 const DIRECTIONS: Vec2[] = [
@@ -7,6 +13,14 @@ const DIRECTIONS: Vec2[] = [
   { x: -1, y:  0 },
   { x:  1, y:  0 },
 ];
+
+/** 移動ベクトルを Direction 文字列に変換する */
+function vecToFacing(dx: number, dy: number): Direction {
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? 'right' : 'left';
+  }
+  return dy >= 0 ? 'down' : 'up';
+}
 
 /** 敵エンティティのAI・状態管理クラス */
 export class Enemy {
@@ -28,9 +42,11 @@ export class Enemy {
   ): boolean {
     switch (enemy.state) {
       case 'idle':
-        if (Enemy.canDetectPlayer(enemy, player)) {
+        if (Enemy.canDetectPlayer(enemy, player, tiles)) {
           enemy.state = 'chase';
           Enemy.runChase(enemy, player, tiles, allEnemies);
+        } else {
+          Enemy.runIdle(enemy, tiles, allEnemies, player);
         }
         break;
 
@@ -41,12 +57,14 @@ export class Enemy {
       case 'telegraph':
         return Enemy.runTelegraph(enemy, player);
 
-      case 'execute':
+      case 'execute': {
         // 攻撃発動：呼び出し元（GameScene）がダメージを処理する
+        const cooldownTurns = enemy.telegraph?.pattern.cooldownTurns ?? 0;
         enemy.state = 'cooldown';
-        enemy.currentCooldown = enemy.cooldownTurns;
+        enemy.currentCooldown = cooldownTurns;
         enemy.telegraph = undefined;
         return true;
+      }
 
       case 'cooldown':
         if (enemy.currentCooldown > 0) {
@@ -60,7 +78,41 @@ export class Enemy {
   }
 
   /**
-   * CHASE状態の行動：隣接したらTELEGRAPH開始、離れていれば1マス接近する
+   * IDLE状態の行動：IDLE_WANDER_CHANCE の確率でランダムな方向に1マス移動する
+   * 移動時に向きも更新されるため、次ターンの視界方向が変化する
+   *
+   * @param enemy - 敵データ（in-place更新）
+   * @param tiles - タイルデータ
+   * @param allEnemies - 全敵一覧
+   * @param player - プレイヤーデータ（移動可否判定に使用）
+   */
+  private static runIdle(
+    enemy: EnemyData,
+    tiles: TileType[][],
+    allEnemies: EnemyData[],
+    player: PlayerData
+  ): void {
+    if (Math.random() >= IDLE_WANDER_CHANCE) return;
+
+    // ランダムな順序で方向を試す
+    const shuffled = [...DIRECTIONS].sort(() => Math.random() - 0.5);
+    const otherEnemies = allEnemies.filter((e) => e.id !== enemy.id);
+
+    for (const dir of shuffled) {
+      const nx = enemy.pos.x + dir.x;
+      const ny = enemy.pos.y + dir.y;
+      if (!Enemy.canMoveTo(nx, ny, tiles, otherEnemies, player)) continue;
+      enemy.pos.x = nx;
+      enemy.pos.y = ny;
+      enemy.facing = vecToFacing(dir.x, dir.y);
+      break;
+    }
+  }
+
+  /**
+   * CHASE状態の行動：攻撃射程内に入ったらTELEGRAPH開始、それ以外は1マス接近する
+   * 攻撃射程は各パターンで「今すぐ撃ったら当たるか」で判定する
+   * 移動時・隣接時ともにプレイヤー方向へ向きを更新する
    *
    * @param enemy - 敵データ（in-place更新）
    * @param player - プレイヤーデータ
@@ -73,19 +125,76 @@ export class Enemy {
     tiles: TileType[][],
     allEnemies: EnemyData[]
   ): void {
-    if (Enemy.isAdjacentToPlayer(enemy, player)) {
-      // 隣接したらテレグラフを開始する
+    // 常にプレイヤー方向へ向く
+    const faceDx = player.pos.x - enemy.pos.x;
+    const faceDy = player.pos.y - enemy.pos.y;
+    if (faceDx !== 0 || faceDy !== 0) {
+      enemy.facing = vecToFacing(faceDx, faceDy);
+    }
+
+    // 今すぐ攻撃したらプレイヤーに当たるパターンを取得
+    const applicablePatterns = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+    if (applicablePatterns.length > 0) {
+      const pattern = Enemy.pickPattern(applicablePatterns);
       enemy.state = 'telegraph';
       enemy.telegraph = {
-        targetTiles: Enemy.calculateTelegraphTiles(enemy, player),
-        turnsUntilExecute: enemy.telegraphTurns,
-        pattern: enemy.attackPattern,
+        targetTiles: Enemy.calculateTelegraphTiles(enemy, player, pattern.name),
+        turnsUntilExecute: pattern.telegraphTurns,
+        pattern,
       };
       return;
     }
+
     const nextPos = Enemy.getNextMove(enemy, player, tiles, allEnemies);
+    const moveDx = nextPos.x - enemy.pos.x;
+    const moveDy = nextPos.y - enemy.pos.y;
+    if (moveDx !== 0 || moveDy !== 0) {
+      enemy.facing = vecToFacing(moveDx, moveDy);
+    }
     enemy.pos.x = nextPos.x;
     enemy.pos.y = nextPos.y;
+  }
+
+  /**
+   * 現在の位置から各攻撃パターンを即座に撃った場合にプレイヤーに当たるパターンを返す
+   * この結果が空でなければ「射程内」と判断し、TELEGRAPHを開始できる
+   *
+   * パターン別の判定ルール:
+   *   line   : 攻撃タイルを計算してプレイヤーが含まれるか + 視線チェック
+   *   single / cross / area : プレイヤーに隣接している場合のみ（近接攻撃）
+   *
+   * @param enemy - 敵データ
+   * @param player - プレイヤーデータ
+   * @param tiles - タイルデータ（視線確認用）
+   * @returns 今すぐ使用可能な攻撃パターン一覧
+   */
+  static getApplicableAttackPatterns(
+    enemy: EnemyData,
+    player: PlayerData,
+    tiles: TileType[][]
+  ): AttackPattern[] {
+    return enemy.attackPatterns.filter((pattern) => {
+      if (pattern.name === 'line') {
+        // lineパターン: 攻撃タイルにプレイヤーが含まれるかつ視線が通っているか確認
+        const attackTiles = Enemy.calculateTelegraphTiles(enemy, player, 'line');
+        const playerInPath = attackTiles.some(
+          (t) => t.x === player.pos.x && t.y === player.pos.y
+        );
+        return playerInPath && FogOfWar.hasLineOfSight(enemy.pos, player.pos, tiles);
+      }
+      // その他（single / cross / area）: 近接攻撃なので隣接必須
+      return Enemy.isAdjacentToPlayer(enemy, player);
+    });
+  }
+
+  /**
+   * 攻撃パターン候補からランダムに1つ選ぶ
+   * @param patterns - 候補一覧（空の場合は 'single' にフォールバック）
+   * @returns 選択された攻撃パターン
+   */
+  static pickPattern(patterns: AttackPattern[]): AttackPattern {
+    if (patterns.length === 0) return { name: 'single', telegraphTurns: 1, cooldownTurns: 0 };
+    return patterns[Math.floor(Math.random() * patterns.length)];
   }
 
   /**
@@ -98,11 +207,12 @@ export class Enemy {
    */
   private static runTelegraph(enemy: EnemyData, player: PlayerData): boolean {
     if (!enemy.telegraph) {
-      // テレグラフデータが欠損している場合は再生成
+      // テレグラフデータが欠損している場合は再生成（パターンも再選択）
+      const pattern = Enemy.pickPattern(enemy.attackPatterns);
       enemy.telegraph = {
-        targetTiles: Enemy.calculateTelegraphTiles(enemy, player),
-        turnsUntilExecute: enemy.telegraphTurns,
-        pattern: enemy.attackPattern,
+        targetTiles: Enemy.calculateTelegraphTiles(enemy, player, pattern.name),
+        turnsUntilExecute: pattern.telegraphTurns,
+        pattern,
       };
     }
 
@@ -174,7 +284,7 @@ export class Enemy {
     player: PlayerData
   ): boolean {
     if (y < 0 || y >= tiles.length || x < 0 || x >= tiles[0].length) return false;
-    if (tiles[y][x] === 'wall') return false;
+    if (isBlockingTile(tiles[y][x])) return false;
     if (otherEnemies.some((e) => e.pos.x === x && e.pos.y === y)) return false;
     // プレイヤーのいるマスには移動しない（バンプは呼び出し元で管理）
     if (player.pos.x === x && player.pos.y === y) return false;
@@ -182,15 +292,32 @@ export class Enemy {
   }
 
   /**
-   * プレイヤーが索敵範囲内にいるか判定する（ユークリッド距離）
-   * @param enemy - 敵データ
+   * 敵の視界コーンにプレイヤーが入っているか判定する
+   * 隣接タイルは向き関係なく常に発見、それ以外はコーン＋壁遮蔽チェック
+   *
+   * @param enemy - 敵データ（pos, facing, detectionRange）
    * @param player - プレイヤーデータ
-   * @returns 検知範囲内ならtrue
+   * @param tiles - タイルデータ（壁遮蔽チェックに使用）
+   * @returns 検知ならtrue
    */
-  static canDetectPlayer(enemy: EnemyData, player: PlayerData): boolean {
+  static canDetectPlayer(enemy: EnemyData, player: PlayerData, tiles: TileType[][]): boolean {
     const dx = player.pos.x - enemy.pos.x;
     const dy = player.pos.y - enemy.pos.y;
-    return Math.sqrt(dx * dx + dy * dy) <= enemy.detectionRange;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // 隣接タイルは向きに関わらず常に検知
+    if (dist <= ENEMY_SURROUNDINGS_RADIUS) return true;
+
+    // 索敵範囲を超えている場合は検知しない
+    if (dist > Math.min(enemy.detectionRange, ENEMY_FOV_RANGE)) return false;
+
+    // 視界コーン外は検知しない
+    if (!FogOfWar.isInCone(enemy.pos, enemy.facing, player.pos, ENEMY_FOV_RANGE, ENEMY_FOV_ANGLE_DEG)) {
+      return false;
+    }
+
+    // 壁越しは検知しない
+    return FogOfWar.hasLineOfSight(enemy.pos, player.pos, tiles);
   }
 
   /**
@@ -218,17 +345,18 @@ export class Enemy {
   }
 
   /**
-   * テレグラフの対象タイルを計算する（Phase 5で使用）
-   * attackPattern に応じた攻撃範囲を返す
+   * テレグラフの対象タイルを計算する
+   * 指定された attackPattern に応じた攻撃範囲を返す
    *
-   * @param enemy - 敵データ（pos, attackPattern）
+   * @param enemy - 敵データ（pos）
    * @param player - プレイヤーデータ（ターゲット方向の計算に使用）
+   * @param pattern - 今回使用する攻撃パターン
    * @returns 攻撃対象タイル一覧
    */
-  static calculateTelegraphTiles(enemy: EnemyData, player: PlayerData): Vec2[] {
+  static calculateTelegraphTiles(enemy: EnemyData, player: PlayerData, pattern: AttackPatternName): Vec2[] {
     const { pos } = enemy;
 
-    switch (enemy.attackPattern) {
+    switch (pattern) {
       case 'single':
         // プレイヤーがいるマスを単体攻撃
         return [{ ...player.pos }];

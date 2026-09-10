@@ -1,4 +1,5 @@
 import type { Vec2, TileType, TileVisibility } from '../types';
+import { isBlockingTile } from '../types';
 
 /** BFS（幅優先探索）による最短経路探索ユーティリティ */
 export class BFSPathfinder {
@@ -26,7 +27,7 @@ export class BFSPathfinder {
 
     // ゴールが範囲外・壁・未探索なら探索しない
     if (goal.x < 0 || goal.x >= width || goal.y < 0 || goal.y >= height) return null;
-    if (tiles[goal.y][goal.x] === 'wall') return null;
+    if (isBlockingTile(tiles[goal.y][goal.x])) return null;
     if (visibility[goal.y][goal.x] === 'unseen') return null;
 
     // 訪問済みマスと前マスを記録（startの前マスはnull）
@@ -52,7 +53,7 @@ export class BFSPathfinder {
         const nx = cur.x + d.x;
         const ny = cur.y + d.y;
         if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-        if (tiles[ny][nx] === 'wall') continue;
+        if (isBlockingTile(tiles[ny][nx])) continue;
         if (visibility[ny][nx] === 'unseen') continue;
 
         const nk = toKey(nx, ny);

@@ -10,7 +10,7 @@ import type { DungeonFloor, PlayerData, Direction, Vec2 } from '../types';
 import {
   TILE_SIZE, MAP_WIDTH, MAP_HEIGHT,
   VIEWPORT_WIDTH, VIEWPORT_HEIGHT,
-  LOG_LINES, UI_PANEL_HEIGHT, TIMER_BAR_HEIGHT, MAX_LEVEL,
+  LOG_LINES, UI_PANEL_HEIGHT, UI_TOP_HEIGHT, TIMER_BAR_HEIGHT,
 } from '../constants';
 
 // --- クリック/タッチ BFS移動の間隔(ms) ---
@@ -23,18 +23,24 @@ const BFS_MOVE_INTERVAL_MS = 160;
 const C_WALL_VISIBLE    = 0x888888;  // 中明度グレー
 const C_FLOOR_VISIBLE   = 0x666666;  // やや暗いグレー
 const C_STAIRS_VISIBLE  = 0xccaa00;  // 明るい金色
+const C_ROCK_VISIBLE    = 0x888888;  // 壁と同色（岩）
 
 // 過去に見たが現在視界外のタイル（暗く・青みがかった記憶色）
 const C_WALL_EXPLORED   = 0x3a3a4a;  // 暗青灰（壁の輪郭が見える程度）
 const C_FLOOR_EXPLORED  = 0x1e1e2a;  // 極暗・青みがかった暗色
 const C_STAIRS_EXPLORED = 0x664400;  // 暗い金色
+const C_ROCK_EXPLORED   = 0x3a3a4a;  // 壁と同色（探索済み岩）
 
 // 未探索エリア
 const C_UNSEEN          = 0x000000;  // 完全な黒
 
 const C_PLAYER            = 0x33dd66;
-const C_ENEMY             = 0xff4444;
-const C_ENEMY_BOSS        = 0xff8800;
+// カテゴリ別敵色（弱 → 強の順で水色→橙→赤→金→紫に遷移）
+const C_ENEMY_MINION      = 0x88ccff;  // 水色：最弱雑魚
+const C_ENEMY_SOLDIER     = 0xff8844;  // 橙：兵士
+const C_ENEMY_ELITE       = 0xff4444;  // 赤：強敵
+const C_ENEMY_BOSS        = 0xffcc00;  // 金：中ボス
+const C_ENEMY_OVERLORD    = 0xcc44ff;  // 紫：大ボス
 const C_HP_RED            = 0xdd2222;
 const C_HP_GREEN          = 0x22dd44;
 const C_TIMER_BG          = 0x222222;
@@ -92,6 +98,8 @@ export class GameScene extends Phaser.Scene {
   private uiGfx!: Phaser.GameObjects.Graphics;
   /** タイマーバー専用レイヤー（毎フレーム更新） */
   private timerGfx!: Phaser.GameObjects.Graphics;
+  /** UIカメラ（フルスクリーン・スクロールなし、マップ非表示） */
+  private uiCamera!: Phaser.Cameras.Scene2D.Camera;
 
   // UIテキスト
   private logTexts: Phaser.GameObjects.Text[] = [];
@@ -108,6 +116,10 @@ export class GameScene extends Phaser.Scene {
   private bfsPath: Vec2[] = [];
   private bfsMoveEvent: Phaser.Time.TimerEvent | null = null;
 
+  // 攻撃アニメーション（プレイヤーが攻撃した方向と開始時刻）
+  private attackAnim: { dx: number; dy: number; startTime: number } | null = null;
+  private static readonly ATTACK_ANIM_MS = 120;
+
   // キー入力
   private keyW!: Phaser.Input.Keyboard.Key;
   private keyA!: Phaser.Input.Keyboard.Key;
@@ -119,6 +131,8 @@ export class GameScene extends Phaser.Scene {
   private keyRight!: Phaser.Input.Keyboard.Key;
   private keySpace!: Phaser.Input.Keyboard.Key;
   private keyEnter!: Phaser.Input.Keyboard.Key;
+  /** Shift+矢印での向き変更用修飾キー */
+  private keyShift!: Phaser.Input.Keyboard.Key;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -164,12 +178,29 @@ export class GameScene extends Phaser.Scene {
     // UIテキスト初期化
     this.setupUI();
 
-    // カメラ設定
+    // カメラ設定：メインカメラはUIパネルを除いたマップ表示エリアのみ
+    const mapViewHeight = VIEWPORT_HEIGHT - UI_TOP_HEIGHT - UI_PANEL_HEIGHT;
+    this.cameras.main.setViewport(0, UI_TOP_HEIGHT, VIEWPORT_WIDTH, mapViewHeight);
     this.cameras.main.setBounds(0, 0, MAP_WIDTH * TILE_SIZE, MAP_HEIGHT * TILE_SIZE);
     this.cameras.main.setZoom(1);
+    // メインカメラはUI要素を描画しない
+    this.cameras.main.ignore([
+      this.uiGfx, this.timerGfx,
+      this.floorText, this.levelText, this.timerLabel,
+      ...this.logTexts,
+    ]);
+
+    // UIカメラ：フルスクリーン・スクロールなし、マップ描画オブジェクトを除外
+    this.uiCamera = this.cameras.add(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT, false, 'ui');
+    this.uiCamera.ignore([
+      this.tileGfx, this.fogGfx, this.telegraphGfx, this.pathGfx, this.entityGfx,
+    ]);
 
     // キー登録
     this.setupKeys();
+
+    // 右クリックのコンテキストメニューを無効化（向き変更操作に使用）
+    this.input.mouse?.disableContextMenu();
 
     // タッチ/クリック入力を登録
     this.input.on('pointerdown', this.onPointerDown, this);
@@ -181,6 +212,10 @@ export class GameScene extends Phaser.Scene {
     // 初期視界計算と描画
     FogOfWar.updateVisibility(this.player, this.floor);
     this.redraw();
+
+    // フロア遷移後のフェードイン（両カメラ同時）
+    this.cameras.main.fadeIn(350, 0, 0, 0);
+    this.uiCamera.fadeIn(350, 0, 0, 0);
 
     // 最初のターンを開始
     this.startPlayerTurn();
@@ -241,6 +276,7 @@ export class GameScene extends Phaser.Scene {
     this.keyRight = kb.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT);
     this.keySpace = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyEnter = kb.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER);
+    this.keyShift = kb.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT);
   }
 
   /**
@@ -249,6 +285,44 @@ export class GameScene extends Phaser.Scene {
   startPlayerTurn(): void {
     this.isWaitingForInput = true;
     this.timer.start();
+  }
+
+  /**
+   * 向き変更アクションを処理する（移動なし・ターン消費）
+   * 向き変更後に視界を更新し、通常ターンと同様に敵AIを進める
+   * @param dir - 新しい向き
+   */
+  private processFacingChange(dir: Direction): void {
+    if (!this.isWaitingForInput) return;
+    this.isWaitingForInput = false;
+    this.timer.stop();
+    this.turnCount++;
+
+    this.player.facing = dir;
+    FogOfWar.updateVisibility(this.player, this.floor);
+
+    const label: Record<Direction, string> = { up: '上', down: '下', left: '左', right: '右' };
+    this.addLog(`${label[dir]}を向いた。`);
+
+    this.redraw();
+    this.processEnemyTurns();
+    if (!Player.isAlive(this.player)) return;
+    this.startPlayerTurn();
+  }
+
+  /**
+   * プレイヤー位置から指定タイルへの4方向を返す
+   * 同じタイルの場合は null を返す
+   * @param tileX - 目標タイルX座標
+   * @param tileY - 目標タイルY座標
+   * @returns 4方向いずれか、またはnull
+   */
+  private calcDirectionToTile(tileX: number, tileY: number): Direction | null {
+    const dx = tileX - this.player.pos.x;
+    const dy = tileY - this.player.pos.y;
+    if (dx === 0 && dy === 0) return null;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+    return dy > 0 ? 'down' : 'up';
   }
 
   /**
@@ -273,6 +347,13 @@ export class GameScene extends Phaser.Scene {
         // バンプアタック：隣接敵に攻撃を実行する
         const enemy = this.floor.enemies.find((e) => e.id === bumpedEnemyId);
         if (enemy) {
+          // 攻撃アニメーション：プレイヤーを敵方向へ一瞬スライドさせる
+          const DIRS: Record<Direction, { dx: number; dy: number }> = {
+            up: { dx: 0, dy: -1 }, down: { dx: 0, dy: 1 },
+            left: { dx: -1, dy: 0 }, right: { dx: 1, dy: 0 },
+          };
+          this.attackAnim = { ...DIRS[action], startTime: this.time.now };
+
           const name = enemy.isBoss ? '【ボス】' : '敵';
           const { damage, killed } = CombatSystem.playerAttack(this.player, enemy);
           this.addLog(`${name}に${damage}ダメージ！（HP: ${enemy.hp}/${enemy.maxHp}）`);
@@ -286,23 +367,37 @@ export class GameScene extends Phaser.Scene {
             // 撃破：敵リストから削除し、EXPを獲得する
             this.floor.enemies = this.floor.enemies.filter((e) => e.id !== bumpedEnemyId);
             this.addLog(`${name}を倒した！`);
+
+            // 敵撃破パーティクル演出
+            this.showEnemyDefeatedEffect(ex, enemy.pos.y * TILE_SIZE + TILE_SIZE / 2, enemy.isBoss);
+
             const levelsGained = CombatSystem.gainExp(this.player, enemy.expReward);
             this.addLog(`EXP +${enemy.expReward}`);
             if (levelsGained > 0) {
               this.addLog(`レベルアップ！ Lv.${this.player.level}  ATK: ${this.player.atk}`);
               this.showLevelUpEffect();
             }
+            // ボスフロアでボスを倒したら階段を出現させる
+            if (enemy.isBoss && !this.floor.bossDefeated) {
+              this.floor.bossDefeated = true;
+              this.addLog('封印が解けた！階段が現れた！');
+              this.showBossDefeatedEffect();
+            }
           }
         }
       } else if (moved) {
         FogOfWar.updateVisibility(this.player, this.floor);
 
-        // 階段チェック：踏んだ瞬間に次フロアへ遷移する
+        // 階段チェック：ボス未撃破なら通過できない
         const { stairsPos } = this.floor;
         if (this.player.pos.x === stairsPos.x && this.player.pos.y === stairsPos.y) {
-          this.redraw();
-          this.goToNextFloor();
-          return; // 敵ターンは発生させない
+          if (!this.floor.bossDefeated) {
+            this.addLog('ボスを倒すまで先へは進めない！');
+          } else {
+            this.redraw();
+            this.goToNextFloor();
+            return; // 敵ターンは発生させない
+          }
         }
       }
     }
@@ -346,6 +441,11 @@ export class GameScene extends Phaser.Scene {
 
       // 攻撃発動：テレグラフ対象にプレイヤーがいれば固定1ダメージ
       if (didExecute && telegraphTiles.length > 0) {
+        // 攻撃アニメーション（視界内の敵のみ）
+        if (isVisible) {
+          this.showAttackEffect(telegraphTiles, enemy.pos);
+        }
+
         const hit = telegraphTiles.some(
           (t) => t.x === this.player.pos.x && t.y === this.player.pos.y
         );
@@ -386,16 +486,21 @@ export class GameScene extends Phaser.Scene {
     const nextFloor = this.floor.floorNumber + 1;
     this.addLog(`${nextFloor}階へ降りる…`);
 
-    this.scene.start('GameScene', {
-      floorNumber: nextFloor,
-      seed: this.baseSeed,
-      savedPlayer: {
-        hp:    this.player.hp,
-        atk:   this.player.atk,
-        level: this.player.level,
-        exp:   this.player.exp,
-      },
-    } as GameSceneData);
+    // フロア移動演出：両カメラをフェードアウト後にシーン遷移
+    this.cameras.main.fadeOut(400, 0, 0, 0);
+    this.uiCamera.fadeOut(400, 0, 0, 0);
+    this.cameras.main.once('camerafadeoutcomplete', () => {
+      this.scene.start('GameScene', {
+        floorNumber: nextFloor,
+        seed: this.baseSeed,
+        savedPlayer: {
+          hp:    this.player.hp,
+          atk:   this.player.atk,
+          level: this.player.level,
+          exp:   this.player.exp,
+        },
+      } as GameSceneData);
+    });
   }
 
   /**
@@ -430,9 +535,7 @@ export class GameScene extends Phaser.Scene {
   private updateUIText(): void {
     this.floorText.setText(`Floor ${this.floor.floorNumber} | Turn ${this.turnCount}`);
     const nextExp = CombatSystem.getNextLevelExp(this.player);
-    const expStr = this.player.level >= MAX_LEVEL
-      ? 'MAX'
-      : `${this.player.exp}/${nextExp}`;
+    const expStr = `${this.player.exp}/${nextExp}`;
     this.levelText.setText(`Lv.${this.player.level}  ATK: ${this.player.atk}  EXP: ${expStr}`);
   }
 
@@ -480,19 +583,28 @@ export class GameScene extends Phaser.Scene {
           continue;
         }
 
+        // ボスフロアでボス未撃破の場合、階段タイルを床として描画する
+        const effectiveTile = (!this.floor.bossDefeated && tile === 'stairs') ? 'floor' : tile;
+
         // 視界内と探索済みで明確に異なる色を直接使用（オーバーレイ方式より識別しやすい）
         let color: number;
         if (vis === 'visible') {
-          color = tile === 'wall' ? C_WALL_VISIBLE : tile === 'stairs' ? C_STAIRS_VISIBLE : C_FLOOR_VISIBLE;
+          color = effectiveTile === 'wall'   ? C_WALL_VISIBLE
+                : effectiveTile === 'stairs' ? C_STAIRS_VISIBLE
+                : effectiveTile === 'rock'   ? C_ROCK_VISIBLE
+                : C_FLOOR_VISIBLE;
         } else {
-          color = tile === 'wall' ? C_WALL_EXPLORED : tile === 'stairs' ? C_STAIRS_EXPLORED : C_FLOOR_EXPLORED;
+          color = effectiveTile === 'wall'   ? C_WALL_EXPLORED
+                : effectiveTile === 'stairs' ? C_STAIRS_EXPLORED
+                : effectiveTile === 'rock'   ? C_ROCK_EXPLORED
+                : C_FLOOR_EXPLORED;
         }
 
         this.tileGfx.fillStyle(color, 1);
         this.tileGfx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
 
-        // グリッド線は visible タイルの床・階段のみ（explored はノイズを減らすため省略）
-        if (vis === 'visible' && tile !== 'wall') {
+        // グリッド線は visible タイルの床・階段のみ（壁・岩は除外）
+        if (vis === 'visible' && tile !== 'wall' && tile !== 'rock') {
           this.tileGfx.lineStyle(1, 0x3a3a3a, 0.4);
           this.tileGfx.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
         }
@@ -503,17 +615,21 @@ export class GameScene extends Phaser.Scene {
   /**
    * 敵の攻撃予告（テレグラフ）を描画する
    * 視界内（visible）タイルのテレグラフのみ表示する
-   * - 通常予告: 黄色半透明オーバーレイ
-   * - 最終予告ターン（turnsUntilExecute === 1）: 赤で点滅（強調）
+   *
+   * 色のルール:
+   *   TELEGRAPH 状態（予告中）    → 黄色（turnsUntilExecute=1 は強く点滅）
+   *   EXECUTE 状態（攻撃発動ターン）→ 赤の高速点滅（即危険）
    */
   private drawTelegraphs(): void {
     this.telegraphGfx.clear();
 
     for (const enemy of this.floor.enemies) {
-      if (!enemy.telegraph || enemy.state === 'cooldown') continue;
+      if (!enemy.telegraph) continue;
+      // COOLDOWN・IDLE・CHASE では表示しない
+      if (enemy.state !== 'telegraph' && enemy.state !== 'execute') continue;
 
       const { targetTiles, turnsUntilExecute } = enemy.telegraph;
-      const isFinal = turnsUntilExecute <= 1;
+      const isExecuting = enemy.state === 'execute';
 
       for (const tile of targetTiles) {
         // 視界内のタイルのみ表示（視界外の予告は見えない）
@@ -523,29 +639,86 @@ export class GameScene extends Phaser.Scene {
         const px = tile.x * TILE_SIZE;
         const py = tile.y * TILE_SIZE;
 
-        if (isFinal) {
-          // 最終ターン：赤で点滅（sin波でアルファを変化させる）
-          const blinkAlpha = ALPHA_TELEGRAPH + (ALPHA_TELEGRAPH_MAX - ALPHA_TELEGRAPH)
-            * (0.5 + 0.5 * Math.sin(this.time.now / 120));
-          this.telegraphGfx.fillStyle(C_TELEGRAPH_DANGER, blinkAlpha);
-        } else {
-          // 通常予告：黄色半透明
-          this.telegraphGfx.fillStyle(C_TELEGRAPH_WARN, ALPHA_TELEGRAPH);
-        }
-
-        this.telegraphGfx.fillRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
-
-        // 枠線（最終ターンのみ）
-        if (isFinal) {
-          this.telegraphGfx.lineStyle(2, C_TELEGRAPH_DANGER, 0.9);
+        if (isExecuting) {
+          // 攻撃発動ターン：赤の高速点滅（緊急！）
+          const pulseAlpha = 0.65 + 0.35 * Math.sin(this.time.now / 75);
+          this.telegraphGfx.fillStyle(C_TELEGRAPH_DANGER, pulseAlpha);
+          this.telegraphGfx.fillRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+          this.telegraphGfx.lineStyle(2, C_TELEGRAPH_DANGER, 1.0);
           this.telegraphGfx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+        } else if (turnsUntilExecute <= 1) {
+          // 直前の予告ターン：黄色・中速点滅（注意！）
+          const pulseAlpha = ALPHA_TELEGRAPH_MAX * (0.75 + 0.25 * Math.sin(this.time.now / 180));
+          this.telegraphGfx.fillStyle(C_TELEGRAPH_WARN, pulseAlpha);
+          this.telegraphGfx.fillRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+          this.telegraphGfx.lineStyle(1, C_TELEGRAPH_WARN, 0.75);
+          this.telegraphGfx.strokeRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+        } else {
+          // 余裕のある予告ターン：薄い黄色（早期警告）
+          this.telegraphGfx.fillStyle(C_TELEGRAPH_WARN, ALPHA_TELEGRAPH);
+          this.telegraphGfx.fillRect(px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
         }
       }
     }
   }
 
   /**
+   * 敵攻撃発動時のアニメーション
+   * 攻撃元（敵位置）から各対象タイルへ飛翔体を飛ばし、タイルをフラッシュさせる
+   * @param tiles - 攻撃対象タイル一覧
+   * @param enemyPos - 攻撃元の敵位置（タイル座標）
+   */
+  private showAttackEffect(tiles: Vec2[], enemyPos: Vec2): void {
+    const enemyWx = enemyPos.x * TILE_SIZE + TILE_SIZE / 2;
+    const enemyWy = enemyPos.y * TILE_SIZE + TILE_SIZE / 2;
+
+    for (const tile of tiles) {
+      const vis = this.floor.visibility[tile.y]?.[tile.x];
+      if (vis !== 'visible') continue;
+
+      const tx = tile.x * TILE_SIZE + TILE_SIZE / 2;
+      const ty = tile.y * TILE_SIZE + TILE_SIZE / 2;
+
+      // 対象タイルの赤フラッシュ（外側に広がって消える）
+      const flashGfx = this.add.graphics();
+      flashGfx.fillStyle(C_TELEGRAPH_DANGER, 0.9);
+      flashGfx.fillRect(tile.x * TILE_SIZE + 1, tile.y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+      flashGfx.setDepth(130);
+      this.uiCamera.ignore(flashGfx);
+
+      this.tweens.add({
+        targets: flashGfx,
+        alpha: 0,
+        scaleX: 1.5,
+        scaleY: 1.5,
+        duration: 380,
+        ease: 'Power2',
+        onComplete: () => flashGfx.destroy(),
+      });
+
+      // 飛翔体（敵の位置からターゲットタイルへ移動して消える）
+      const projGfx = this.add.graphics();
+      projGfx.fillStyle(0xff6600, 1.0);
+      projGfx.fillCircle(0, 0, 5);
+      projGfx.setPosition(enemyWx, enemyWy);
+      projGfx.setDepth(135);
+      this.uiCamera.ignore(projGfx);
+
+      this.tweens.add({
+        targets: projGfx,
+        x: tx,
+        y: ty,
+        alpha: 0,
+        duration: 220,
+        ease: 'Power1',
+        onComplete: () => projGfx.destroy(),
+      });
+    }
+  }
+
+  /**
    * プレイヤーと敵を描画する（視界外の敵は非表示）
+   * 毎フレーム呼ばれ、ボブアニメーションと攻撃アニメーションを反映する
    */
   private drawEntities(): void {
     this.entityGfx.clear();
@@ -554,22 +727,118 @@ export class GameScene extends Phaser.Scene {
       const vis = this.floor.visibility[enemy.pos.y]?.[enemy.pos.x];
       if (vis !== 'visible') continue;
 
-      const px = enemy.pos.x * TILE_SIZE;
-      const py = enemy.pos.y * TILE_SIZE;
-      const color = enemy.isBoss ? C_ENEMY_BOSS : C_ENEMY;
-      const pad = enemy.isBoss ? 2 : 5;
+      const tx = enemy.pos.x * TILE_SIZE + TILE_SIZE / 2;
+      const ty = enemy.pos.y * TILE_SIZE + TILE_SIZE / 2;
+      const bob = this.getBobOffset(enemy.id);
+      const cy = ty + bob;
+      // カテゴリ別の色を選択する
+      const colorMap: Record<string, number> = {
+        minion:   C_ENEMY_MINION,
+        soldier:  C_ENEMY_SOLDIER,
+        elite:    C_ENEMY_ELITE,
+        boss:     C_ENEMY_BOSS,
+        overlord: C_ENEMY_OVERLORD,
+      };
+      const color = colorMap[enemy.category] ?? C_ENEMY_ELITE;
 
       this.entityGfx.fillStyle(color, 1);
-      this.entityGfx.fillRect(px + pad, py + pad, TILE_SIZE - pad * 2, TILE_SIZE - pad * 2);
-      this.drawEnemyHpBar(px, py, enemy.hp, enemy.maxHp);
+      if (enemy.category === 'overlord') {
+        // 大ボス：大きな星型
+        this.drawStar(tx, cy, 11, 5);
+      } else if (enemy.category === 'boss') {
+        // 中ボス：大きなひし形
+        this.drawDiamond(tx, cy, 10, 12);
+      } else {
+        switch (enemy.variant) {
+          case 0: this.entityGfx.fillCircle(tx, cy, 7); break;
+          case 1: this.drawDiamond(tx, cy, 7, 8); break;
+          case 2: this.drawStar(tx, cy, 8, 4); break;
+        }
+      }
+
+      // 向きインジケーター（IDLE時は半透明、CHASE以降は不透明）
+      const facingAlpha = enemy.state === 'idle' ? 0.4 : 0.85;
+      this.drawFacingIndicator(
+        enemy.pos.x * TILE_SIZE,
+        enemy.pos.y * TILE_SIZE + bob,
+        enemy.facing,
+        0xffffff,
+        facingAlpha,
+      );
+
+      this.drawEnemyHpBar(enemy.pos.x * TILE_SIZE, enemy.pos.y * TILE_SIZE, enemy.hp, enemy.maxHp);
     }
 
-    // プレイヤー
-    const px = this.player.pos.x * TILE_SIZE;
-    const py = this.player.pos.y * TILE_SIZE;
+    // プレイヤー（攻撃アニメーション適用）
+    let offsetX = 0;
+    let offsetY = 0;
+    if (this.attackAnim) {
+      const elapsed = this.time.now - this.attackAnim.startTime;
+      if (elapsed < GameScene.ATTACK_ANIM_MS) {
+        const t = elapsed / GameScene.ATTACK_ANIM_MS;
+        const push = Math.sin(t * Math.PI) * 7; // 0→最大7px→0
+        offsetX = this.attackAnim.dx * push;
+        offsetY = this.attackAnim.dy * push;
+      } else {
+        this.attackAnim = null;
+      }
+    }
+    const px = this.player.pos.x * TILE_SIZE + TILE_SIZE / 2 + offsetX;
+    const py = this.player.pos.y * TILE_SIZE + TILE_SIZE / 2 + this.getBobOffset('player') + offsetY;
+    const half = 7;
     this.entityGfx.fillStyle(C_PLAYER, 1);
-    this.entityGfx.fillRect(px + 4, py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
-    this.drawFacingIndicator(px, py);
+    this.entityGfx.fillRect(px - half, py - half, half * 2, half * 2);
+    this.drawFacingIndicator(
+      this.player.pos.x * TILE_SIZE + offsetX,
+      this.player.pos.y * TILE_SIZE + offsetY + this.getBobOffset('player'),
+      this.player.facing,
+    );
+  }
+
+  /**
+   * 上下にゆらゆら動くボブオフセットを返す（エンティティごとに位相をずらす）
+   * @param seed - 位相のシード文字列（エンティティIDなど）
+   * @returns Y方向オフセット（ピクセル）
+   */
+  private getBobOffset(seed: string): number {
+    const phase = seed.split('').reduce((a, c) => a + c.charCodeAt(0), 0) * 0.7;
+    return Math.sin(this.time.now / 180 + phase) * 2.5;
+  }
+
+  /**
+   * ひし形（ロタート45°の矩形）を描画する
+   * @param cx - 中心X
+   * @param cy - 中心Y
+   * @param hw - 半幅
+   * @param hh - 半高さ
+   */
+  private drawDiamond(cx: number, cy: number, hw: number, hh: number): void {
+    const g = this.entityGfx;
+    g.fillTriangle(cx, cy - hh, cx + hw, cy, cx - hw, cy);
+    g.fillTriangle(cx - hw, cy, cx + hw, cy, cx, cy + hh);
+  }
+
+  /**
+   * 5角星を描画する
+   * @param cx - 中心X
+   * @param cy - 中心Y
+   * @param outerR - 外接円半径
+   * @param innerR - 内接円半径
+   */
+  private drawStar(cx: number, cy: number, outerR: number, innerR: number): void {
+    const g = this.entityGfx;
+    const pts = 5;
+    g.beginPath();
+    for (let i = 0; i < pts * 2; i++) {
+      const r = i % 2 === 0 ? outerR : innerR;
+      const angle = (i * Math.PI / pts) - Math.PI / 2;
+      const x = cx + r * Math.cos(angle);
+      const y = cy + r * Math.sin(angle);
+      if (i === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.closePath();
+    g.fillPath();
   }
 
   /**
@@ -594,13 +863,21 @@ export class GameScene extends Phaser.Scene {
    * @param px - プレイヤーの描画X（ピクセル）
    * @param py - プレイヤーの描画Y（ピクセル）
    */
-  private drawFacingIndicator(px: number, py: number): void {
+  /**
+   * 向きを示す小三角形インジケーターを描画する
+   * @param px - タイル左上X座標（ピクセル）
+   * @param py - タイル左上Y座標（ピクセル）
+   * @param facing - 向き文字列
+   * @param color - 三角形の色
+   * @param alpha - 不透明度
+   */
+  private drawFacingIndicator(px: number, py: number, facing: string, color = 0xffffff, alpha = 0.85): void {
     const cx = px + TILE_SIZE / 2;
     const cy = py + TILE_SIZE / 2;
     const r = 5;
     let pts: { x: number; y: number }[];
 
-    switch (this.player.facing) {
+    switch (facing) {
       case 'up':
         pts = [{ x: cx, y: cy - r - 4 }, { x: cx - r, y: cy - 2 }, { x: cx + r, y: cy - 2 }];
         break;
@@ -610,12 +887,12 @@ export class GameScene extends Phaser.Scene {
       case 'left':
         pts = [{ x: cx - r - 4, y: cy }, { x: cx - 2, y: cy - r }, { x: cx - 2, y: cy + r }];
         break;
-      case 'right':
+      default: // right
         pts = [{ x: cx + r + 4, y: cy }, { x: cx + 2, y: cy - r }, { x: cx + 2, y: cy + r }];
         break;
     }
 
-    this.entityGfx.fillStyle(0xffffff, 0.85);
+    this.entityGfx.fillStyle(color, alpha);
     this.entityGfx.fillTriangle(
       pts[0].x, pts[0].y,
       pts[1].x, pts[1].y,
@@ -646,9 +923,7 @@ export class GameScene extends Phaser.Scene {
    * 最大レベル時は満タン表示
    */
   private drawExpBar(): void {
-    const ratio = this.player.level >= MAX_LEVEL
-      ? 1
-      : this.player.exp / CombatSystem.getNextLevelExp(this.player);
+    const ratio = this.player.exp / CombatSystem.getNextLevelExp(this.player);
     const barW = Math.round(TIMER_BAR_WIDTH * Math.min(ratio, 1));
 
     // バー背景
@@ -745,6 +1020,9 @@ export class GameScene extends Phaser.Scene {
    * ・キー入力検知
    */
   update(): void {
+    // エンティティを毎フレーム再描画してボブ・攻撃アニメーションを滑らかにする
+    this.drawEntities();
+
     // タイマーバーは常時更新（入力待ち中のみ）
     if (this.isWaitingForInput) {
       this.drawTimerBar();
@@ -762,6 +1040,16 @@ export class GameScene extends Phaser.Scene {
     // キー入力（JustDown でチャタリング防止）
     // BFS自動移動中にキーを押すと経路をキャンセルして通常移動に切り替える
     const JD = Phaser.Input.Keyboard.JustDown;
+
+    // Shift+矢印：向き変更（移動なし・ターン消費）
+    if (this.keyShift.isDown) {
+      if (JD(this.keyW) || JD(this.keyUp))    { this.clearBfsPath(); this.processFacingChange('up');    return; }
+      if (JD(this.keyS) || JD(this.keyDown))  { this.clearBfsPath(); this.processFacingChange('down');  return; }
+      if (JD(this.keyA) || JD(this.keyLeft))  { this.clearBfsPath(); this.processFacingChange('left');  return; }
+      if (JD(this.keyD) || JD(this.keyRight)) { this.clearBfsPath(); this.processFacingChange('right'); return; }
+    }
+
+    // 通常移動
     if (JD(this.keyW) || JD(this.keyUp))         { this.clearBfsPath(); this.processPlayerAction('up');    return; }
     if (JD(this.keyS) || JD(this.keyDown))        { this.clearBfsPath(); this.processPlayerAction('down');  return; }
     if (JD(this.keyA) || JD(this.keyLeft))        { this.clearBfsPath(); this.processPlayerAction('left');  return; }
@@ -782,15 +1070,38 @@ export class GameScene extends Phaser.Scene {
   // --- クリック/タッチ BFS経路移動 ---
 
   /**
-   * ポインタ押下イベント：進行中のBFS経路をキャンセルする
+   * ポインタ押下イベント：2本指タッチで向き変更、それ以外はBFS経路をキャンセルする
+   * @param pointer - Phaserポインタオブジェクト
    */
-  private onPointerDown = (): void => {
+  private onPointerDown = (pointer: Phaser.Input.Pointer): void => {
+    // 右クリックは onPointerUp で処理するためここでは何もしない
+    if (pointer.button === 2) return;
+
+    // 2本指タッチ：向き変更（ターン消費）
+    const p1 = this.input.pointer1;
+    const p2 = this.input.pointer2;
+    if (p1.isDown && p2.isDown && this.isWaitingForInput) {
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      const cam = this.cameras.main;
+      const worldX = midX - cam.x + cam.scrollX;
+      const worldY = midY - cam.y + cam.scrollY;
+      const dir = this.calcDirectionToTile(
+        Math.floor(worldX / TILE_SIZE),
+        Math.floor(worldY / TILE_SIZE),
+      );
+      if (dir) {
+        this.processFacingChange(dir);
+        return;
+      }
+    }
+
     this.clearBfsPath();
   };
 
   /**
-   * ポインタ離上イベント：クリックしたタイルへのBFS経路を計算して自動移動を開始する
-   * 壁・未探索タイル・敵のいるタイルは目標にできない
+   * ポインタ離上イベント：右クリックで向き変更、左クリックでBFS経路移動を開始する
+   * 壁・未探索タイル・敵のいるタイルは左クリックの目標にできない
    * 経路が見つからない場合は何もしない
    *
    * @param pointer - Phaserポインタオブジェクト
@@ -798,15 +1109,27 @@ export class GameScene extends Phaser.Scene {
   private onPointerUp = (pointer: Phaser.Input.Pointer): void => {
     if (!this.isWaitingForInput) return;
 
+    // UI領域のクリックは無視（カメラビューポート外）
+    const cam = this.cameras.main;
+    if (pointer.y < cam.y || pointer.y > cam.y + cam.height) return;
+
     // スクリーン座標をワールド座標に変換してタイル位置を算出する
-    const worldX = pointer.x + this.cameras.main.scrollX;
-    const worldY = pointer.y + this.cameras.main.scrollY;
+    // カメラビューポートのY座標オフセット(UI_TOP_HEIGHT)を補正する
+    const worldX = pointer.x - cam.x + cam.scrollX;
+    const worldY = pointer.y - cam.y + cam.scrollY;
     const tileX = Math.floor(worldX / TILE_SIZE);
     const tileY = Math.floor(worldY / TILE_SIZE);
 
+    // 右クリック：向き変更（ターン消費）
+    if (pointer.button === 2) {
+      const dir = this.calcDirectionToTile(tileX, tileY);
+      if (dir) this.processFacingChange(dir);
+      return;
+    }
+
     if (tileX < 0 || tileX >= MAP_WIDTH || tileY < 0 || tileY >= MAP_HEIGHT) return;
     if (tileX === this.player.pos.x && tileY === this.player.pos.y) return;
-    if (this.floor.tiles[tileY][tileX] === 'wall') return;
+    if (this.floor.tiles[tileY][tileX] === 'wall' || this.floor.tiles[tileY][tileX] === 'rock') return;
     if (this.floor.visibility[tileY][tileX] === 'unseen') return;
     // 敵タイルをクリックした場合：プレイヤーが隣接していれば攻撃、離れていれば無視
     const clickedEnemy = this.floor.enemies.find((e) => e.pos.x === tileX && e.pos.y === tileY);
@@ -921,6 +1244,76 @@ export class GameScene extends Phaser.Scene {
   // --- 演出エフェクト ---
 
   /**
+   * 敵撃破パーティクル演出：爆発状に小片が飛び散り消える
+   * @param worldX - 爆発中心ワールドX座標
+   * @param worldY - 爆発中心ワールドY座標
+   * @param isBoss - ボス撃破かどうか（規模が大きくなる）
+   */
+  private showEnemyDefeatedEffect(worldX: number, worldY: number, isBoss: boolean): void {
+    const color = isBoss ? 0xff8800 : 0xff4444;
+    const count = isBoss ? 12 : 8;
+    const distance = isBoss ? 55 : 38;
+    const duration = isBoss ? 650 : 450;
+
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      const size = isBoss ? 6 : 4;
+
+      const gfx = this.add.graphics();
+      gfx.fillStyle(color, 1);
+      gfx.fillRect(-size / 2, -size / 2, size, size);
+      gfx.setPosition(worldX, worldY);
+      gfx.setDepth(150);
+      // ワールド座標オブジェクトはUIカメラに表示しない
+      this.uiCamera.ignore(gfx);
+
+      const tx = worldX + Math.cos(angle) * distance;
+      const ty = worldY + Math.sin(angle) * distance;
+
+      this.tweens.add({
+        targets: gfx,
+        x: tx,
+        y: ty,
+        alpha: 0,
+        scaleX: 0.3,
+        scaleY: 0.3,
+        duration,
+        ease: 'Power2',
+        onComplete: () => gfx.destroy(),
+      });
+    }
+  }
+
+  /**
+   * ボス撃破特別演出：白フラッシュ＋ "BOSS DEFEATED!" テキスト
+   */
+  private showBossDefeatedEffect(): void {
+    this.cameras.main.flash(500, 255, 200, 100, true);
+    this.uiCamera.flash(500, 255, 200, 100, true);
+    const cx = VIEWPORT_WIDTH / 2;
+    const cy = VIEWPORT_HEIGHT / 2 - 20;
+    const txt = this.add.text(cx, cy, 'BOSS DEFEATED!', {
+      fontSize: '30px',
+      color: '#ff8800',
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setScrollFactor(0).setDepth(300).setOrigin(0.5);
+    // スクリーン座標オブジェクトはメインカメラに表示しない
+    this.cameras.main.ignore(txt);
+
+    this.tweens.add({
+      targets: txt,
+      y: cy - 60,
+      alpha: 0,
+      duration: 1800,
+      ease: 'Power2',
+      onComplete: () => txt.destroy(),
+    });
+  }
+
+  /**
    * 被弾演出：画面を赤くフラッシュしカメラを揺らす
    */
   private showDamageFlash(): void {
@@ -933,6 +1326,7 @@ export class GameScene extends Phaser.Scene {
    */
   private showLevelUpEffect(): void {
     this.cameras.main.flash(300, 255, 200, 0, true);
+    this.uiCamera.flash(300, 255, 200, 0, true);
     const cx = VIEWPORT_WIDTH / 2;
     const cy = VIEWPORT_HEIGHT / 2;
     const txt = this.add.text(cx, cy, 'LEVEL UP!', {
@@ -941,6 +1335,8 @@ export class GameScene extends Phaser.Scene {
       fontFamily: 'monospace',
       fontStyle: 'bold',
     }).setScrollFactor(0).setDepth(300).setOrigin(0.5);
+    // スクリーン座標オブジェクトはメインカメラに表示しない
+    this.cameras.main.ignore(txt);
 
     this.tweens.add({
       targets: txt,
@@ -966,6 +1362,8 @@ export class GameScene extends Phaser.Scene {
       fontFamily: 'monospace',
       fontStyle: 'bold',
     }).setOrigin(0.5, 1).setDepth(200);
+    // ワールド座標テキストはUIカメラに表示しない
+    this.uiCamera.ignore(txt);
 
     this.tweens.add({
       targets: txt,

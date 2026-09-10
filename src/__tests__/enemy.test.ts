@@ -14,10 +14,11 @@ function makeEnemy(overrides: Partial<EnemyData> = {}): EnemyData {
     def: 0,
     state: 'idle',
     isBoss: false,
+    category: 'minion' as const,
+    variant: 0,
     detectionRange: ENEMY_DETECTION_RANGE,
-    telegraphTurns: TELEGRAPH_TURNS_NORMAL,
-    attackPattern: 'single',
-    cooldownTurns: 1,
+    facing: 'down' as const,
+    attackPatterns: [{ name: 'single', telegraphTurns: TELEGRAPH_TURNS_NORMAL, cooldownTurns: 0 }],
     currentCooldown: 0,
     expReward: 10,
     ...overrides,
@@ -40,22 +41,43 @@ function makeFloor(size = 20): TileType[][] {
  */
 describe('Enemy AI', () => {
   describe('canDetectPlayer()', () => {
-    it('索敵範囲内のプレイヤーを検知する', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 } });
-      const player = makePlayer({ x: 5, y: 10 }); // 距離5
-      expect(Enemy.canDetectPlayer(enemy, player)).toBe(true);
+    it('視界コーン内（正面）のプレイヤーを検知する', () => {
+      // 敵が下向き、プレイヤーが真下に距離3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down' });
+      const player = makePlayer({ x: 5, y: 8 });
+      const tiles = makeFloor();
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(true);
     });
 
-    it('索敵範囲外のプレイヤーを検知しない', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, detectionRange: 5 });
-      const player = makePlayer({ x: 5, y: 15 }); // 距離10 > 5
-      expect(Enemy.canDetectPlayer(enemy, player)).toBe(false);
+    it('視界コーン外（真後ろ）のプレイヤーは検知しない', () => {
+      // 敵が下向き、プレイヤーが真上（背後）に距離3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down' });
+      const player = makePlayer({ x: 5, y: 2 });
+      const tiles = makeFloor();
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(false);
     });
 
-    it('同じ位置は検知する', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 } });
-      const player = makePlayer({ x: 5, y: 5 });
-      expect(Enemy.canDetectPlayer(enemy, player)).toBe(true);
+    it('隣接タイルは向きに関係なく常に検知する', () => {
+      // 敵が下向きでも、真上に隣接していれば検知
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down' });
+      const player = makePlayer({ x: 5, y: 4 }); // 距離1（ENEMY_SURROUNDINGS_RADIUS=1以内）
+      const tiles = makeFloor();
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(true);
+    });
+
+    it('索敵範囲外は検知しない', () => {
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down', detectionRange: 3 });
+      const player = makePlayer({ x: 5, y: 15 }); // 距離10 > min(3, 5)
+      const tiles = makeFloor();
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(false);
+    });
+
+    it('壁で視線が遮られていると検知しない', () => {
+      const tiles = makeFloor();
+      tiles[7][5] = 'wall'; // 敵とプレイヤーの間に壁
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, facing: 'down' });
+      const player = makePlayer({ x: 5, y: 9 });
+      expect(Enemy.canDetectPlayer(enemy, player, tiles)).toBe(false);
     });
   });
 
@@ -83,17 +105,27 @@ describe('Enemy AI', () => {
   });
 
   describe('updateAI() – 状態遷移', () => {
-    it('IDLEでプレイヤーを検知したらCHASEに遷移する', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle' });
-      const player = makePlayer({ x: 5, y: 8 }); // 距離3（検知範囲内）
+    it('IDLEで正面のプレイヤーを検知したらCHASEに遷移する', () => {
+      // 敵が下向き、プレイヤーが正面（真下）距離3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle', facing: 'down' });
+      const player = makePlayer({ x: 5, y: 8 });
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);
       expect(enemy.state).toBe('chase');
     });
 
+    it('IDLEで背後のプレイヤーはCHASEに遷移しない', () => {
+      // 敵が下向き、プレイヤーが背後（真上）距離3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle', facing: 'down' });
+      const player = makePlayer({ x: 5, y: 2 });
+      const tiles = makeFloor();
+      Enemy.updateAI(enemy, player, tiles, [enemy]);
+      expect(enemy.state).toBe('idle');
+    });
+
     it('IDLEでプレイヤーが遠すぎたらIDLEのまま', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle', detectionRange: 3 });
-      const player = makePlayer({ x: 5, y: 15 }); // 距離10 > 3
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, state: 'idle', facing: 'down', detectionRange: 3 });
+      const player = makePlayer({ x: 5, y: 15 }); // 距離10 > min(3, 5)
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);
       expect(enemy.state).toBe('idle');
@@ -119,7 +151,7 @@ describe('Enemy AI', () => {
     });
 
     it('COOLDOWNでカウントダウンが0になったらCHASEに戻る', () => {
-      const enemy = makeEnemy({ state: 'cooldown', cooldownTurns: 1, currentCooldown: 1 });
+      const enemy = makeEnemy({ state: 'cooldown', currentCooldown: 1 });
       const player = makePlayer({ x: 5, y: 4 });
       const tiles = makeFloor();
       Enemy.updateAI(enemy, player, tiles, [enemy]);
@@ -194,19 +226,103 @@ describe('Enemy AI', () => {
     });
   });
 
+  describe('getApplicableAttackPatterns()', () => {
+    it('singleパターン：隣接時は返す', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 6 },
+        attackPatterns: [{ name: 'single', telegraphTurns: 1, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 真上に隣接
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(1);
+    });
+
+    it('singleパターン：離れている場合は返さない', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 9 },
+        attackPatterns: [{ name: 'single', telegraphTurns: 1, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 距離4
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(0);
+    });
+
+    it('lineパターン：プレイヤーが射程内かつ視線が通れば返す', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 8 },
+        attackPatterns: [{ name: 'line', telegraphTurns: 2, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 上方向 距離3（射程内）
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(1);
+    });
+
+    it('lineパターン：プレイヤーが射程外なら返さない（距離4以上）', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 9 },
+        attackPatterns: [{ name: 'line', telegraphTurns: 2, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 上方向 距離4（射程3を超える）
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(0);
+    });
+
+    it('lineパターン：壁で視線が遮られていれば返さない', () => {
+      const tiles = makeFloor();
+      tiles[7][5] = 'wall'; // 敵(5,8)とプレイヤー(5,5)の間に壁
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 8 },
+        attackPatterns: [{ name: 'line', telegraphTurns: 2, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 });
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(0);
+    });
+
+    it('lineパターン：横方向にも射程が届く', () => {
+      const enemy = makeEnemy({
+        pos: { x: 2, y: 5 },
+        attackPatterns: [{ name: 'line', telegraphTurns: 2, cooldownTurns: 0 }],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 右方向 距離3
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(1);
+    });
+
+    it('複数パターンのうち適用可能なものだけを返す', () => {
+      const enemy = makeEnemy({
+        pos: { x: 5, y: 8 },
+        attackPatterns: [
+          { name: 'single', telegraphTurns: 1, cooldownTurns: 0 }, // 隣接のみ → 不可
+          { name: 'line',   telegraphTurns: 2, cooldownTurns: 0 }, // 距離3 → 可
+        ],
+      });
+      const player = makePlayer({ x: 5, y: 5 }); // 距離3
+      const tiles = makeFloor();
+      const result = Enemy.getApplicableAttackPatterns(enemy, player, tiles);
+      expect(result).toHaveLength(1);
+      expect(result[0].name).toBe('line');
+    });
+  });
+
   describe('calculateTelegraphTiles()', () => {
     it('single パターンはプレイヤー位置を1マス返す', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 5 }, attackPattern: 'single' });
+      const enemy = makeEnemy({ pos: { x: 5, y: 5 } });
       const player = makePlayer({ x: 5, y: 3 });
-      const tiles = Enemy.calculateTelegraphTiles(enemy, player);
+      const tiles = Enemy.calculateTelegraphTiles(enemy, player, 'single');
       expect(tiles).toHaveLength(1);
       expect(tiles[0]).toEqual({ x: 5, y: 3 });
     });
 
     it('cross パターンは5マス返す（プレイヤー＋上下左右）', () => {
-      const enemy = makeEnemy({ pos: { x: 0, y: 0 }, attackPattern: 'cross' });
+      const enemy = makeEnemy({ pos: { x: 0, y: 0 } });
       const player = makePlayer({ x: 5, y: 5 });
-      const tiles = Enemy.calculateTelegraphTiles(enemy, player);
+      const tiles = Enemy.calculateTelegraphTiles(enemy, player, 'cross');
       expect(tiles).toHaveLength(5);
       expect(tiles).toContainEqual({ x: 5, y: 5 });
       expect(tiles).toContainEqual({ x: 5, y: 4 });
@@ -214,18 +330,18 @@ describe('Enemy AI', () => {
     });
 
     it('line パターンは3マス返す（プレイヤー方向）', () => {
-      const enemy = makeEnemy({ pos: { x: 5, y: 10 }, attackPattern: 'line' });
+      const enemy = makeEnemy({ pos: { x: 5, y: 10 } });
       const player = makePlayer({ x: 5, y: 5 }); // 上方向
-      const tiles = Enemy.calculateTelegraphTiles(enemy, player);
+      const tiles = Enemy.calculateTelegraphTiles(enemy, player, 'line');
       expect(tiles).toHaveLength(3);
       // 上方向の直線（y 9, 8, 7）
       expect(tiles).toContainEqual({ x: 5, y: 9 });
     });
 
     it('area パターンは9マス返す（プレイヤー周辺3×3）', () => {
-      const enemy = makeEnemy({ pos: { x: 0, y: 0 }, attackPattern: 'area' });
+      const enemy = makeEnemy({ pos: { x: 0, y: 0 } });
       const player = makePlayer({ x: 5, y: 5 });
-      const tiles = Enemy.calculateTelegraphTiles(enemy, player);
+      const tiles = Enemy.calculateTelegraphTiles(enemy, player, 'area');
       expect(tiles).toHaveLength(9);
     });
   });

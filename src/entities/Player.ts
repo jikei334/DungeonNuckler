@@ -1,4 +1,5 @@
 import type { PlayerData, Direction, Vec2, TileType } from '../types';
+import { isBlockingTile } from '../types';
 import { PLAYER_MAX_HP, BASE_ATK } from '../constants';
 
 /** 方向からマス移動量へのマッピング */
@@ -63,8 +64,8 @@ export class Player {
       return { moved: false, bumpedEnemyId: bumpedEnemy.id };
     }
 
-    // 壁チェック
-    if (tiles[ny][nx] === 'wall') {
+    // 壁・岩チェック（通行不可）
+    if (isBlockingTile(tiles[ny][nx])) {
       return { moved: false, bumpedEnemyId: null };
     }
 
